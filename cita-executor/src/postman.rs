@@ -15,7 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use cita_types::{Address, H256, U256};
+use cita_types::{Address, H160, H256, U256};
 use core::contracts::solc::sys_config::ChainId;
 use core::libexecutor::blacklist::BlackList;
 use core::libexecutor::block::{ClosedBlock, OpenBlock};
@@ -24,7 +24,7 @@ use core::libexecutor::economical_model::EconomicalModel;
 use core::receipt::ReceiptError;
 use crossbeam_channel::{Receiver, Sender};
 use error::ErrorCode;
-use jsonrpc_types::rpc_types::{BlockNumber, CountOrCode};
+use jsonrpc_types::rpc_types::{BlockNumber, CountOrCode, ReceiptEx};
 use libproto::auth::Miscellaneous;
 use libproto::blockchain::{RichStatus, StateSignal};
 use libproto::request::Request_oneof_req as Request;
@@ -663,6 +663,34 @@ impl Postman {
                         response.set_code(ErrorCode::query_error());
                         response.set_error_msg(format!("{:?}", err));
                     });
+            }
+
+            Request::transaction_receipt_ex(serialized) => {
+                trace!("executor get: {:?}", serialized);
+
+                if let Ok(mut receipt) = serde_json::from_str::<ReceiptEx>(&serialized) {
+                    let get_balance = |ref account: Option<H160>| {
+                        account
+                            .and_then(|account| {
+                                command::balance_at(
+                                    &self.command_req_sender,
+                                    &self.command_resp_receiver,
+                                    account,
+                                    BlockId::Latest,
+                                )
+                            })
+                            .and_then(|b| Some(U256::from(H256::from_slice(&b))))
+                    };
+                    receipt.to_balance = get_balance(receipt.to);
+                    receipt.from_balance = get_balance(receipt.from);
+                    let _ = serde_json::to_string(&receipt)
+                        .map_err(|_| {
+                            response.set_receipt_ex("".to_string());
+                        })
+                        .map(|data| response.set_receipt_ex(data));
+                } else {
+                    response.set_receipt_ex(serialized);
+                }
             }
 
             _ => {

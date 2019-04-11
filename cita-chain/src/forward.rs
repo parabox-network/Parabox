@@ -22,7 +22,7 @@ use core::libchain::OpenBlock;
 use error::ErrorCode;
 use jsonrpc_types::rpc_types::{
     BlockNumber as RpcBlockNumber, BlockParamsByHash, BlockParamsByNumber, Filter as RpcFilter,
-    Log as RpcLog, Receipt as RpcReceipt, RpcBlock,
+    Log as RpcLog, Receipt as RpcReceipt, ReceiptEx as RpcReceiptEx, RpcBlock,
 };
 use libproto::router::{MsgType, RoutingKey, SubModules};
 use libproto::snapshot::{Cmd, Resp, SnapshotReq, SnapshotResp};
@@ -135,7 +135,9 @@ impl Forward {
 
     fn reply_request(&self, mut req: request::Request, imsg: Vec<u8>) {
         let mut response = response::Response::new();
-        response.set_request_id(req.take_request_id());
+        let req_id = req.take_request_id();
+        response.set_request_id(req_id.clone());
+        trace!("origin request: {:?} \n imsg:{:?}", req, imsg);
         match req.req.unwrap() {
             // TODO: should check the result, parse it first!
             Request::block_number(_) => {
@@ -227,6 +229,37 @@ impl Forward {
                     response.set_receipt(serialized);
                 } else {
                     response.set_none(true);
+                }
+            }
+
+            Request::transaction_receipt_ex(hash) => {
+                trace!("receiptEx {:?}", hash);
+                if let Ok(tx_hash) = serde_json::from_str::<H256>(&hash) {
+                    let receipt = self.chain.localized_receipt(tx_hash);
+                    if let Some(receipt) = receipt {
+                        let rpc_receiptex: RpcReceiptEx = receipt.into();
+                        let serialized = serde_json::to_string(&rpc_receiptex).unwrap();
+                        //response.set_receipt_ex(serialized);
+
+                        // send to executor.
+                        let mut request = request::Request::new();
+                        request.set_request_id(req_id.clone());
+                        request.set_transaction_receipt_ex(serialized);
+                        let msg: Message = request.into();
+
+                        self.ctx_pub
+                            .send((
+                                routing_key!(Chain >> Request).into(),
+                                msg.try_into().unwrap(),
+                            ))
+                            .unwrap();
+                        return;
+                    } else {
+                        response.set_none(true);
+                    }
+                } else {
+                    response.set_code(ErrorCode::query_error());
+                    response.set_error_msg(format!("{}", "unexcepted transaction hash!"));
                 }
             }
 

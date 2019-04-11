@@ -49,6 +49,7 @@ use proof::BftProof;
 use pubsub::channel::Sender;
 use receipt::{LocalizedReceipt, Receipt};
 use rlp::{self, Encodable};
+use rustc_hex::ToHex;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::Into;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -999,13 +1000,18 @@ impl Chain {
                 _ => None,
             };
 
+            let chain_to: Option<Address> = match *stx.action() {
+                Action::Call(address) => Some(address.clone().into()),
+                _ => None,
+            };
+            let quota_used = last_receipt.quota_used - prior_quota_used;
             let receipt = LocalizedReceipt {
                 transaction_hash: id,
                 transaction_index: index,
                 block_hash: hash,
                 block_number: number,
                 cumulative_quota_used: last_receipt.quota_used,
-                quota_used: last_receipt.quota_used - prior_quota_used,
+                quota_used: quota_used,
                 contract_address,
                 logs: last_receipt
                     .logs
@@ -1024,6 +1030,13 @@ impl Chain {
                 log_bloom: last_receipt.log_bloom,
                 state_root: last_receipt.state_root,
                 error: last_receipt.error,
+                from: *stx.sender(),
+                to: chain_to,
+                value: stx.value,
+                data: format!("0x{}", stx.data[..].to_hex()),
+                quota_limit: stx.gas,
+                quota_price: U256::from(1), //stx.gas_price,
+                quota_cost: quota_used * U256::from(1),
             };
             Some(receipt)
         } else {

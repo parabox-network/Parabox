@@ -18,7 +18,7 @@
 
 use cita_types::traits::LowerHex;
 use cita_types::{Address, H256, U256};
-use jsonrpc_types::rpc_types::Receipt as RpcReceipt;
+use jsonrpc_types::rpc_types::{Receipt as RpcReceipt, ReceiptEx as RpcReceiptEx};
 use libproto::executor::{
     Receipt as ProtoReceipt, ReceiptError as ProtoReceiptError, ReceiptErrorWithOption, StateRoot,
 };
@@ -362,6 +362,20 @@ pub struct LocalizedReceipt {
     pub state_root: Option<H256>,
     /// Receipt error
     pub error: Option<ReceiptError>,
+    /// Sender
+    pub from: Address,
+    /// Receiver
+    pub to: Option<Address>,
+    /// Send value
+    pub value: U256,
+    /// Send data
+    pub data: String,
+    /// Quota limit
+    pub quota_limit: U256,
+    /// Quota price
+    pub quota_price: U256,
+    /// Quota fee = used * price
+    pub quota_cost: U256,
 }
 
 impl Into<RpcReceipt> for LocalizedReceipt {
@@ -378,6 +392,33 @@ impl Into<RpcReceipt> for LocalizedReceipt {
             state_root: self.state_root.map(Into::into),
             logs_bloom: self.log_bloom,
             error_message: self.error.map(|error| error.description()),
+        }
+    }
+}
+
+impl Into<RpcReceiptEx> for LocalizedReceipt {
+    fn into(self) -> RpcReceiptEx {
+        RpcReceiptEx {
+            transaction_hash: Some(self.transaction_hash),
+            transaction_index: Some(self.transaction_index.into()),
+            block_hash: Some(self.block_hash),
+            block_number: Some(self.block_number.into()),
+            cumulative_quota_used: self.cumulative_quota_used,
+            quota_used: Some(self.quota_used),
+            contract_address: self.contract_address.map(Into::into),
+            logs: self.logs.into_iter().map(Into::into).collect(),
+            state_root: self.state_root.map(Into::into),
+            logs_bloom: self.log_bloom,
+            error_message: self.error.map(|error| error.description()),
+            from: Some(self.from),
+            to: self.to,
+            value: Some(self.value),
+            data: Some(self.data),
+            from_balance: None,
+            to_balance: None,
+            quota_limit: Some(self.quota_limit),
+            quota_price: Some(self.quota_price),
+            quota_cost: Some(self.quota_cost),
         }
     }
 }
