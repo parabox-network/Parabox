@@ -33,6 +33,7 @@ use jsonrpc_types::rpc_types::{
 };
 pub use libexecutor::block::*;
 use libexecutor::call_request::CallRequest;
+use libexecutor::estimate::EstimateRequest;
 use libproto::ExecutedResult;
 use serde_json;
 use state::State;
@@ -54,6 +55,7 @@ pub enum Command {
     BalanceAt(Address, BlockId),
     NonceAt(Address, BlockId),
     ETHCall(CallRequest, BlockId),
+    EstimateGas(EstimateRequest, BlockId),
     SignCall(CallRequest),
     Call(SignedTransaction, BlockId, CallAnalytics),
     ChainID,
@@ -74,6 +76,7 @@ pub enum CommandResp {
     BalanceAt(Option<Bytes>),
     NonceAt(Option<U256>),
     ETHCall(Result<Bytes, String>),
+    EstimateGas(Result<U256, String>),
     SignCall(SignedTransaction),
     Call(Result<Executed, CallError>),
     ChainID(Option<ChainId>),
@@ -95,6 +98,7 @@ impl fmt::Display for Command {
             Command::BalanceAt(_, _) => write!(f, "Command::BalanceAt"),
             Command::NonceAt(_, _) => write!(f, "Command::NonceAt"),
             Command::ETHCall(_, _) => write!(f, "Command::ETHCall"),
+            Command::EstimateGas(_, _) => write!(f, "Command::EstimateGas"),
             Command::SignCall(_) => write!(f, "Command::SignCall"),
             Command::Call(_, _, _) => write!(f, "Command::Call"),
             Command::ChainID => write!(f, "Command::ChainID "),
@@ -118,6 +122,7 @@ impl fmt::Display for CommandResp {
             CommandResp::BalanceAt(_) => write!(f, "CommandResp::BalanceAt"),
             CommandResp::NonceAt(_) => write!(f, "CommandResp::NonceAt"),
             CommandResp::ETHCall(_) => write!(f, "CommandResp::ETHCall"),
+            CommandResp::EstimateGas(_) => write!(f, "CommandResp::EstimateGas"),
             CommandResp::SignCall(_) => write!(f, "CommandResp::SignCall"),
             CommandResp::Call(_) => write!(f, "CommandResp::Call"),
             CommandResp::ChainID(_) => write!(f, "CommandResp::ChainID "),
@@ -140,6 +145,8 @@ pub trait Commander {
     fn balance_at(&self, address: &Address, block_id: BlockId) -> Option<Bytes>;
     fn nonce_at(&self, address: &Address, block_id: BlockId) -> Option<U256>;
     fn eth_call(&self, request: CallRequest, block_id: BlockId) -> Result<Bytes, String>;
+    fn estimate_gas(&self, request: EstimateRequest, id: BlockId) -> Result<U256, String>;
+    fn sign_estimate(&self, request: EstimateRequest) -> SignedTransaction;
     fn sign_call(&self, request: CallRequest) -> SignedTransaction;
     fn call(
         &self,
@@ -177,6 +184,9 @@ impl Commander for Executor {
             }
             Command::ETHCall(call_request, block_id) => {
                 CommandResp::ETHCall(self.eth_call(call_request, block_id))
+            }
+            Command::EstimateGas(request, block_id) => {
+                CommandResp::EstimateGas(self.estimate_gas(request, block_id))
             }
             Command::SignCall(call_request) => CommandResp::SignCall(self.sign_call(call_request)),
             Command::Call(signed_transaction, block_id, call_analytics) => {
@@ -246,6 +256,38 @@ impl Commander for Executor {
         result
             .map(|b| b.output)
             .or_else(|e| Err(format!("Call Error {}", e)))
+    }
+
+    fn estimate_gas(&self, request: EstimateRequest, id: BlockId) -> Result<U256, String> {
+        let signed = self.sign_estimate(request);
+        let result = self.call(&signed, id, Default::default());
+        result
+            .map(|b| b.gas_used)
+            .or_else(|e| Err(format!("Estimate gas Error {}", e)))
+    }
+
+    fn sign_estimate(&self, request: EstimateRequest) -> SignedTransaction {
+        let from = request.from.unwrap_or_else(Address::zero);
+        let action = request.to.map_or(Action::Create, |t| {
+            if t == Address::zero() {
+                Action::Create
+            } else {
+                Action::Call(t)
+            }
+        });
+        Transaction {
+            nonce: "".to_string(),
+            action: action,
+            gas: U256::from(500_000_000),
+            gas_price: U256::one(),
+            value: request.value.unwrap_or(U256::zero()),
+            data: request.data.map_or_else(Vec::new, |d| d.to_vec()),
+            block_limit: u64::max_value(),
+            // TODO: Should Fixed?
+            chain_id: U256::default(),
+            version: 0u32,
+        }
+        .fake_sign(from)
     }
 
     fn sign_call(&self, request: CallRequest) -> SignedTransaction {
@@ -585,6 +627,19 @@ pub fn eth_call(
     command_req_sender.send(Command::ETHCall(call_request, block_id));
     match command_resp_receiver.recv().unwrap() {
         CommandResp::ETHCall(r) => r,
+        _ => unimplemented!(),
+    }
+}
+
+pub fn estimate_gas(
+    command_req_sender: &Sender<Command>,
+    command_resp_receiver: &Receiver<CommandResp>,
+    request: EstimateRequest,
+    block_id: BlockId,
+) -> Result<U256, String> {
+    command_req_sender.send(Command::EstimateGas(request, block_id));
+    match command_resp_receiver.recv().unwrap() {
+        CommandResp::EstimateGas(r) => r,
         _ => unimplemented!(),
     }
 }

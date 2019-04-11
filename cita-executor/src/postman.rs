@@ -21,6 +21,7 @@ use core::libexecutor::blacklist::BlackList;
 use core::libexecutor::block::{ClosedBlock, OpenBlock};
 use core::libexecutor::call_request::CallRequest;
 use core::libexecutor::economical_model::EconomicalModel;
+use core::libexecutor::estimate::EstimateRequest;
 use core::receipt::ReceiptError;
 use crossbeam_channel::{Receiver, Sender};
 use error::ErrorCode;
@@ -492,6 +493,33 @@ impl Postman {
                             response.set_code(ErrorCode::query_error());
                             response.set_error_msg(err);
                         })
+                    })
+                    .map_err(|err| {
+                        response.set_code(ErrorCode::query_error());
+                        response.set_error_msg(format!("{:?}", err));
+                    });
+            }
+
+            Request::estimate_gas(estimate) => {
+                trace!("Chainvm estimate_gas {:?}", estimate);
+                let _ = serde_json::from_str::<BlockNumber>(&estimate.height)
+                    .map(|block_id| {
+                        let estimate_request = EstimateRequest::from(estimate);
+                        command::estimate_gas(
+                            &self.command_req_sender,
+                            &self.command_resp_receiver,
+                            estimate_request,
+                            block_id.into()
+                        )
+                            .map(|ok| {
+                                let mut bytes = [0u8; 32];
+                                ok.to_big_endian(&mut bytes);
+                                response.set_estimate_gas(bytes.to_vec());
+                            })
+                            .map_err(|err| {
+                                response.set_code(ErrorCode::query_error());
+                                response.set_error_msg(err);
+                            })
                     })
                     .map_err(|err| {
                         response.set_code(ErrorCode::query_error());

@@ -198,6 +198,14 @@ impl Forward {
                 }
             }
 
+            Request::estimate_gas(call) => {
+                trace!("Chainvm estimate gas {:?}", call);
+                self.ctx_pub
+                    .send((routing_key!(Chain >> Request).into(), imsg))
+                    .unwrap();
+                return;
+            }
+
             Request::transaction(hash) => {
                 match self.chain.full_transaction(H256::from_slice(&hash)) {
                     Some(ts) => {

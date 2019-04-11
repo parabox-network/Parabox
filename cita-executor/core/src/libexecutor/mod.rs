@@ -21,6 +21,7 @@ pub mod block;
 pub mod call_request;
 pub mod command;
 pub mod economical_model;
+pub mod estimate;
 pub mod executor;
 pub mod fsm;
 pub mod genesis;
