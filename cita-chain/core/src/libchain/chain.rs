@@ -1137,7 +1137,7 @@ impl Chain {
                         receipts.len(),
                         hashes.len()
                     );
-                    assert!(false);
+                    unreachable!();
                 }
                 log_index = receipts
                     .iter()
@@ -1200,8 +1200,15 @@ impl Chain {
         from_block: BlockId,
         to_block: BlockId,
     ) -> Option<Vec<BlockNumber>> {
-        match (self.block_number(from_block), self.block_number(to_block)) {
-            (Some(from), Some(to)) => Some(self.blocks_with_bloom(bloom, from, to)),
+        match (
+            self.block_number(from_block),
+            self.block_number(to_block),
+            self.block_number(BlockId::Pending),
+        ) {
+            (Some(from), Some(to), Some(pending)) => {
+                let end = if to > pending { pending } else { to };
+                Some(self.blocks_with_bloom(bloom, from, end))
+            }
             _ => None,
         }
     }

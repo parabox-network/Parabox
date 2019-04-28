@@ -120,7 +120,7 @@ class GenesisData(object):
     def load_contracts_list(self, contracts_list_file):
         """From file to load the list of contracts."""
         with open(contracts_list_file, 'r') as stream:
-            contracts_list = yaml.load(stream)
+            contracts_list = yaml.safe_load(stream)
         contracts_list['NormalContracts'] = dictlist_to_ordereddict(
             contracts_list['NormalContracts'])
         contracts_list['PermissionContracts']['basic'] \
@@ -134,7 +134,7 @@ class GenesisData(object):
     def load_contracts_args(self, init_data_file):
         """From file to load arguments for contracts."""
         with open(init_data_file, 'r') as stream:
-            data = yaml.load(stream)
+            data = yaml.safe_load(stream)
         contracts_args = dictlist_to_ordereddict(data['Contracts'])
         for name, arguments in contracts_args.items():
             contracts_args[name] = dictlist_to_ordereddict(arguments)
@@ -239,13 +239,12 @@ class GenesisData(object):
             self.mine_contract_on_chain_tester(addr, data['bin'] + extra)
 
     def set_account_value(self, address, value):
-        for addr in address:
-            self.accounts[addr] = {
-                'code': '',
-                'storage': {},
-                'nonce': '1',
-                'value': value,
-            }
+        self.accounts[address] = {
+            'code': '',
+            'storage': {},
+            'nonce': '1',
+            'value': value,
+        }
 
     def save_to_file(self, filepath):
         with open(filepath, 'w') as stream:
@@ -276,6 +275,11 @@ def parse_arguments():
         '--output', required=True, help='Path of the output file.')
     parser.add_argument(
         '--timestamp', type=int, help='Specify a timestamp to use.')
+    parser.add_argument(
+        '--init_token',
+        type=lambda x: hex(int(x,16)),
+        default=hex(int("0xffffffffffffffffffffffffff", 16)),
+        help='Init token for this chain, INIT_TOKEN is a hexadecimal number')
     parser.add_argument('--prevhash', help='Prevhash of genesis.')
     args = parser.parse_args()
     return dict(
@@ -284,12 +288,13 @@ def parse_arguments():
         init_data_file=args.init_data_file,
         output=args.output,
         timestamp=args.timestamp,
+        init_token=args.init_token,
         prevhash=args.prevhash,
     )
 
 
 def core(contracts_dir, contracts_docs_dir, init_data_file, output, timestamp,
-         prevhash):
+         init_token, prevhash):
     # pylint: disable=too-many-arguments
     replaceLogRecord()
     if solidity.get_solidity() is None:
@@ -305,14 +310,11 @@ def core(contracts_dir, contracts_docs_dir, init_data_file, output, timestamp,
         prevhash,
     )
     with open(init_data_file, 'r') as stream:
-        data = yaml.load(stream)
-    address = data['Contracts'][2]['NodeManager'][0]['nodes']
+        data = yaml.safe_load(stream)
     super_admin = data['Contracts'][6]['Admin'][0]['admin']
-    address.append(super_admin)
-    value = '0xffffffffffffffffffffffffff'
     genesis_data.init_normal_contracts()
     genesis_data.init_permission_contracts()
-    genesis_data.set_account_value(address, value)
+    genesis_data.set_account_value(super_admin, init_token)
     genesis_data.save_to_file(output)
 
 

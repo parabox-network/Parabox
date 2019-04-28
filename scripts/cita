@@ -3,7 +3,11 @@
 # ex: ts=4 sw=4 et
 
 # Commands Paths
-CITA_BIN="$(cd $(dirname "$0") && pwd -P)"
+if [ `uname` == 'Darwin' ]; then
+    CITA_BIN="$(dirname $(realpath $0))"
+else
+    CITA_BIN="$(dirname $(readlink -f $0))"
+fi
 CITA_SCRIPTS="$(dirname $CITA_BIN)/scripts"
 
 if [ "$1" != "bebop" ]; then
@@ -49,8 +53,8 @@ usage() {
     cat <<EOF
 Usage: $SCRIPT <command> <node> [options]
 where <command> is one of the following:
-    { help | create | port | setup | start | stop | restart
-      ping | top | backup | clean | logs | logrotate }
+    { help | create | append | port | setup | start | stop
+      restart ping | top | backup | clean | logs | logrotate }
 Run \`$SCRIPT help\` for more detailed information.
 EOF
 }
@@ -69,8 +73,13 @@ This is the primary script for controlling the $SCRIPT node.
         Creates blockchains according to the following config,
         use "cita create -h" to get more information.
         "cita-config" has the same function.
+    append <config>
+        Append a node into an existed chain,
+        use "cita append -h" to get more information.
+        "cita-config" has the same function.
     port <ports>
-        Sets docker port, for example: "cita port 1337:1337"
+        Sets docker port, for example: "cita port 1337:1337 1338:1338",
+        expose docker port 1337 and 1338.
  SERVICE CONTROL COMMANDS
     setup <node>
         Ensuring the required runtime environment for $SCRIPT node, like
@@ -123,6 +132,9 @@ create() {
     $CITA_SCRIPTS/create_cita_config.py $@
 }
 
+append() {
+    $CITA_SCRIPTS/create_cita_config.py $@
+}
 
 # SERVICE CONTROL COMMANDS
 start_rabbitmq() {
@@ -326,7 +338,7 @@ do_logrotate() {
     sleep 2
     for logfile in ${NODE_LOGS_DIR}/cita-*.log; do
         if [[ ${logs} != *"${logfile}"* ]]; then
-            echo "${logfile}"
+            echo "./${NODE_NAME}/logs/${logfile##*/}"
         fi
     done
 }
@@ -374,6 +386,11 @@ case "${COMMAND}" in
 
     create)
         create $@
+        exit 0
+        ;;
+
+    append)
+        append $@
         exit 0
         ;;
 
