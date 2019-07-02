@@ -4,6 +4,55 @@ All notable changes to this project will be documented in this file. And this pr
 
 ## [Unreleased]
 
+## [v0.25.0] - 2019-06-28
+
+### Framework
+
+- [Optimization] Bump Rust toolchain to `1.34.2`. [@kaikai1024]
+- [Optimization] Use Rust 2018 edition. [@kaikai1024] [@ouwenkg]
+- [Optimization] Use `cita-logger` crate. [@kaikai1024]
+
+### Network
+
+- [Fix] Fix the bug that save wrong session. [@leeyr338]
+- [Fix] Should not unwrap on handle_remote_msg. [@leeyr338]
+- [Fix] Fix the operation of repeated peer key. [@jerry-yu]
+- [Feature] Add retransfer message for P2P network. [@jerry-yu]
+
+### System Contracts
+
+- [Fix] Fix the import path. [@ouwenkg]
+- [Optimization] Use `protocol version` instead of version. [@kaikai1024]
+- [Optimization] Rename `emergency brake` to `emergency intervention`. [@kaikai1024]
+
+### Tools
+
+- [Refactor] Rewrite the tool of creating genesis using Rust. [@ouwenkg]
+
+### Test
+
+- [Refactor] Refactor scripts of integrate test. [@kaikai1024]
+- [Optimization] Add quota unit test in travisCI. [@ouwenkg]
+
+### Scripts
+
+- [Fix] Node path should not consider bin path. [@rainchen]
+- [Refactor] Refactor the `cita.sh` script. [@kaikai1024]
+- [Fix] Fix amend help info and latest version. [@leeyr338]
+- [Optimization] Rename `config_example` to `default_config`. [@kaikai1024]
+
+### Doc
+
+- [Doc] Add file naming style doc. [@kaikai1024]
+- [Doc] New CITA contents structure of CITAHub-Docs. [@kaikai1024] [@zhouyun-zoe] [@ouwenkg] [@leeyr338] [@wuyuyue]
+- [Doc] Add wiki about RocksDB. [@leeyr338]
+- [Doc] Update the description about `getTransactionCount`. [@ouwenkg]
+
+## [v0.24.1] - 2019-06-14
+
+Fix the issue about memory leak in cita-executor.
+Check the details at [#588]
+
 ## [v0.24.0] - 2019-05-18
 
 ### Framework
@@ -789,6 +838,7 @@ Release the first version of CITA.
 
 [#201]: https://github.com/cryptape/cita/issues/201
 [#206]: https://github.com/cryptape/cita/issues/206
+[#588]: https://github.com/cryptape/cita/issues/588
 [Account model based zero-knowledge proof transaction.]: https://github.com/cryptape/cita/blob/develop/cita-executor/core/src/native/zk_privacy.md
 [CITA docker images]: https://hub.docker.com/r/cita/
 [Emergency braking system contract]: https://docs.citahub.com/zh-CN/cita/system/emergency-brake
@@ -810,7 +860,9 @@ Release the first version of CITA.
 [set quota price]: https://docs.citahub.com/zh-CN/cita/system/price
 [sidechain exit mechanism]: https://docs.nervos.org/cita/#/crosschain/crosschain_contract_example
 
-[Unreleased]: https://github.com/cryptape/cita/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/cryptape/cita/compare/v0.25.0...HEAD
+[v0.25.0]: https://github.com/cryptape/cita/compare/v0.24.1...v0.25.0
+[v0.24.1]: https://github.com/cryptape/cita/compare/v0.24.0...v0.24.1
 [v0.24.0]: https://github.com/cryptape/cita/compare/v0.23.0...v0.24.0
 [v0.23.1]: https://github.com/cryptape/cita/compare/v0.23.0...v0.23.1
 [v0.23.0]: https://github.com/cryptape/cita/compare/v0.22.0...v0.23.0
@@ -847,6 +899,7 @@ Release the first version of CITA.
 [@leeyr338]: https://github.com/leeyr338
 [@luqz]: https://github.com/luqz
 [@ouwenkg]: https://github.com/ouwenkg
+[@rainchen]: https://github.com/rainchen
 [@rev-chaos]: https://github.com/rev-chaos
 [@rink1969]: https://github.com/rink1969
 [@u2]: https://github.com/u2
