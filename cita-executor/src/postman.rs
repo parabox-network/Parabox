@@ -23,7 +23,7 @@ use crate::core::libexecutor::economical_model::EconomicalModel;
 use crate::core::libexecutor::estimate::EstimateRequest;
 use crate::core::receipt::ReceiptError;
 use crate::types::ids::BlockId;
-use cita_types::{Address, H256, U256};
+use cita_types::{Address, H160, H256, U256};
 use crossbeam_channel::{Receiver, Sender};
 use error::ErrorCode;
 use jsonrpc_types::rpc_types::{BlockNumber, CountOrCode, ReceiptEx};

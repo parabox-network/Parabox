@@ -27,6 +27,7 @@ use crate::error::CallError;
 use crate::executive::{Executed, Executive, TransactOptions};
 pub use crate::libexecutor::block::*;
 use crate::libexecutor::call_request::CallRequest;
+use crate::libexecutor::estimate::EstimateRequest;
 use crate::state::State;
 use crate::state_db::StateDB;
 use crate::types::ids::BlockId;
@@ -39,9 +40,7 @@ use evm::env_info::EnvInfo;
 use jsonrpc_types::rpc_types::{
     BlockNumber, BlockTag, EconomicalModel as RpcEconomicalModel, MetaData,
 };
-pub use libexecutor::block::*;
-use libexecutor::call_request::CallRequest;
-use libexecutor::estimate::EstimateRequest;
+
 use libproto::ExecutedResult;
 use serde_json;
 use std::convert::{From, Into};
