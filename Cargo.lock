@@ -270,7 +270,7 @@ dependencies = [
 [[package]]
 name = "blake2b"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "cc 1.0.26 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -471,6 +471,7 @@ dependencies = [
  "db 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
  "dotenv 0.13.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "error 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
+ "evm 0.1.0",
  "hashable 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
  "jsonrpc-types 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
  "libproto 0.6.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
@@ -541,7 +542,7 @@ dependencies = [
 [[package]]
 name = "cita-crypto"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "cita-crypto-trait 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
  "cita-ed25519 0.6.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
@@ -563,7 +564,7 @@ dependencies = [
 [[package]]
 name = "cita-crypto-trait"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "cita-types 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
 ]
@@ -579,7 +580,7 @@ dependencies = [
 [[package]]
 name = "cita-directories"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "uuid 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -595,7 +596,7 @@ dependencies = [
 [[package]]
 name = "cita-ed25519"
 version = "0.6.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "bincode 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "cita-crypto-trait 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
@@ -718,7 +719,7 @@ dependencies = [
 [[package]]
 name = "cita-merklehash"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "cita-types 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
  "hashable 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
@@ -790,7 +791,7 @@ dependencies = [
 [[package]]
 name = "cita-secp256k1"
 version = "0.6.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "bincode 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "cita-crypto-trait 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
@@ -824,7 +825,7 @@ dependencies = [
 [[package]]
 name = "cita-sm2"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "cita-crypto-trait 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
  "cita-types 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
@@ -852,7 +853,7 @@ dependencies = [
 [[package]]
 name = "cita-types"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "ethereum-types 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "plain_hasher 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1267,7 +1268,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "db"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "cita-logger 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "cita-types 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
@@ -1400,7 +1401,7 @@ dependencies = [
 [[package]]
 name = "error"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 
 [[package]]
 name = "error-chain"
@@ -1495,7 +1496,7 @@ dependencies = [
 [[package]]
 name = "ethcore-bloom-journal"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "siphasher 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -1801,7 +1802,7 @@ dependencies = [
 [[package]]
 name = "hashable"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "blake2b 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
  "cita-types 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
@@ -2049,7 +2050,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "jsonrpc-proto"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "bincode 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "cita-logger 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2066,7 +2067,7 @@ dependencies = [
 [[package]]
 name = "jsonrpc-types"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "bincode 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "cita-types 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
@@ -2080,7 +2081,7 @@ dependencies = [
 [[package]]
 name = "jsonrpc-types-internals"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "proc-macro2 0.4.20 (registry+https://github.com/rust-lang/crates.io-index)",
  "quote 0.6.8 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2162,7 +2163,7 @@ dependencies = [
 [[package]]
 name = "libproto"
 version = "0.6.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "cita-crypto 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
  "cita-logger 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2688,7 +2689,7 @@ dependencies = [
 [[package]]
 name = "panic_hook"
 version = "0.0.1"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "backtrace 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "cita-logger 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2824,7 +2825,7 @@ dependencies = [
 [[package]]
 name = "proof"
 version = "0.6.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "bincode 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "cita-crypto 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
@@ -2862,7 +2863,7 @@ dependencies = [
 [[package]]
 name = "pubsub"
 version = "0.6.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "dotenv 0.13.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "pubsub_kafka 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
@@ -2884,7 +2885,7 @@ dependencies = [
 [[package]]
 name = "pubsub_kafka"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "cita-logger 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "crossbeam-channel 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2908,7 +2909,7 @@ dependencies = [
 [[package]]
 name = "pubsub_rabbitmq"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "amqp 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "crossbeam-channel 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2926,7 +2927,7 @@ dependencies = [
 [[package]]
 name = "pubsub_zeromq"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "cita-logger 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "crossbeam-channel 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -3262,7 +3263,7 @@ dependencies = [
 [[package]]
 name = "rlp"
 version = "0.2.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "byteorder 1.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "cita-types 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
@@ -3295,7 +3296,7 @@ dependencies = [
 [[package]]
 name = "rlp_derive"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "quote 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "syn 0.11.11 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -3520,7 +3521,7 @@ dependencies = [
 [[package]]
 name = "snappy"
 version = "0.1.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "libc 0.2.46 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -4161,7 +4162,7 @@ dependencies = [
 [[package]]
 name = "tx_pool"
 version = "0.6.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "cita-crypto 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
  "cita-types 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
@@ -4314,7 +4315,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "util"
 version = "0.6.0"
-source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#95b981caf24ebc3b3182f0b3f90d33551bcbc1ef"
+source = "git+https://github.com/ABMatrix/cita-common.git?branch=develop#deb2675d3e5d2562a45677656bedd232dddd2fda"
 dependencies = [
  "ansi_term 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "cita-types 0.1.0 (git+https://github.com/ABMatrix/cita-common.git?branch=develop)",
