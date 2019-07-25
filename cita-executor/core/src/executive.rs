@@ -43,7 +43,7 @@ use crate::trace::{
 };
 use crate::types::reserved_addresses;
 use crate::types::transaction::{Action, SignedTransaction};
-use cita_types::{Address, H160, H256, U256, U512};
+use cita_types::{Address, H160, U256, U512};
 use crossbeam;
 use evm::action_params::{ActionParams, ActionValue};
 use evm::call_type::CallType;
@@ -72,16 +72,16 @@ thread_local! {
             |s| s.parse().ok()).unwrap_or(2 * 1024 * 1024));
 }
 
-///amend the abi data
-const AMEND_ABI: u32 = 1;
-///amend the account code
-const AMEND_CODE: u32 = 2;
-///amend the kv of db
-const AMEND_KV_H256: u32 = 3;
-///amend get the value of db
-const AMEND_GET_KV_H256: u32 = 4;
-///amend account's balance
-const AMEND_ACCOUNT_BALANCE: u32 = 5;
+/////amend the abi data
+//const AMEND_ABI: u32 = 1;
+/////amend the account code
+//const AMEND_CODE: u32 = 2;
+/////amend the kv of db
+//const AMEND_KV_H256: u32 = 3;
+/////amend get the value of db
+//const AMEND_GET_KV_H256: u32 = 4;
+/////amend account's balance
+//const AMEND_ACCOUNT_BALANCE: u32 = 5;
 
 /// Returns new address created from address and given nonce.
 pub fn contract_address(address: &Address, nonce: &U256) -> Address {
@@ -241,54 +241,54 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
             .unwrap_or(false)
     }
 
-    fn transact_set_code(&mut self, data: &[u8]) -> bool {
-        let account = H160::from(&data[0..20]);
-        let code = &data[20..];
-        self.state.reset_code(&account, code.to_vec()).is_ok()
-    }
-
-    fn transact_set_balance(&mut self, data: &[u8]) -> bool {
-        if data.len() < 52 {
-            return false;
-        }
-        let account = H160::from(&data[0..20]);
-        let balance = U256::from(&data[20..52]);
-        self.state
-            .balance(&account)
-            .and_then(|now_val| {
-                if now_val >= balance {
-                    self.state.sub_balance(&account, &(now_val - balance))
-                } else {
-                    self.state.add_balance(&account, &(balance - now_val))
-                }
-            })
-            .is_ok()
-    }
-
-    fn transact_set_kv_h256(&mut self, data: &[u8]) -> bool {
-        let len = data.len();
-        if len < 84 {
-            return false;
-        }
-        let loop_num: usize = (len - 20) / (32 * 2);
-        let account = H160::from(&data[0..20]);
-
-        for i in 0..loop_num {
-            let base = 20 + 32 * 2 * i;
-            let key = H256::from_slice(&data[base..base + 32]);
-            let val = H256::from_slice(&data[base + 32..base + 32 * 2]);
-            if self.state.set_storage(&account, key, val).is_err() {
-                return false;
-            }
-        }
-        true
-    }
-
-    fn transact_get_kv_h256(&mut self, data: &[u8]) -> Option<H256> {
-        let account = H160::from(&data[0..20]);
-        let key = H256::from_slice(&data[20..52]);
-        self.state.storage_at(&account, &key).ok()
-    }
+//    fn transact_set_code(&mut self, data: &[u8]) -> bool {
+//        let account = H160::from(&data[0..20]);
+//        let code = &data[20..];
+//        self.state.reset_code(&account, code.to_vec()).is_ok()
+//    }
+//
+//    fn transact_set_balance(&mut self, data: &[u8]) -> bool {
+//        if data.len() < 52 {
+//            return false;
+//        }
+//        let account = H160::from(&data[0..20]);
+//        let balance = U256::from(&data[20..52]);
+//        self.state
+//            .balance(&account)
+//            .and_then(|now_val| {
+//                if now_val >= balance {
+//                    self.state.sub_balance(&account, &(now_val - balance))
+//                } else {
+//                    self.state.add_balance(&account, &(balance - now_val))
+//                }
+//            })
+//            .is_ok()
+//    }
+//
+//    fn transact_set_kv_h256(&mut self, data: &[u8]) -> bool {
+//        let len = data.len();
+//        if len < 84 {
+//            return false;
+//        }
+//        let loop_num: usize = (len - 20) / (32 * 2);
+//        let account = H160::from(&data[0..20]);
+//
+//        for i in 0..loop_num {
+//            let base = 20 + 32 * 2 * i;
+//            let key = H256::from_slice(&data[base..base + 32]);
+//            let val = H256::from_slice(&data[base + 32..base + 32 * 2]);
+//            if self.state.set_storage(&account, key, val).is_err() {
+//                return false;
+//            }
+//        }
+//        true
+//    }
+//
+//    fn transact_get_kv_h256(&mut self, data: &[u8]) -> Option<H256> {
+//        let account = H160::from(&data[0..20]);
+//        let key = H256::from_slice(&data[20..52]);
+//        self.state.storage_at(&account, &key).ok()
+//    }
 
     pub fn transact_with_tracer<T, V>(
         &'a mut self,
@@ -662,65 +662,71 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
         if Some(params.origin) != self.state.super_admin_account {
             return Err(evm::error::Error::Internal("no permission".to_owned()));
         }
-        let atype = params.value.value().low_u32();
-        let mut result = FinalizationResult {
+        let result = FinalizationResult {
             gas_left: params.gas,
             apply_state: true,
             return_data: ReturnData::empty(),
         };
-        match atype {
-            AMEND_ABI => {
-                if self.transact_set_abi(&(params.data.to_owned().unwrap())) {
-                    Ok(result)
-                } else {
-                    Err(evm::error::Error::Internal(
-                        "Account doesn't exist".to_owned(),
-                    ))
-                }
-            }
-            AMEND_CODE => {
-                if self.transact_set_code(&(params.data.to_owned().unwrap())) {
-                    Ok(result)
-                } else {
-                    Err(evm::error::Error::Internal(
-                        "Account doesn't exist".to_owned(),
-                    ))
-                }
-            }
-            AMEND_KV_H256 => {
-                if self.transact_set_kv_h256(&(params.data.to_owned().unwrap())) {
-                    Ok(result)
-                } else {
-                    Err(evm::error::Error::Internal(
-                        "Account doesn't exist".to_owned(),
-                    ))
-                }
-            }
-            AMEND_GET_KV_H256 => {
-                if let Some(v) = self.transact_get_kv_h256(&(params.data.to_owned().unwrap())) {
-                    let data = v.to_vec();
-                    let size = data.len();
-                    result.return_data = ReturnData::new(data, 0, size);
-                    Ok(result)
-                } else {
-                    Err(evm::error::Error::Internal(
-                        "May be incomplete trie error".to_owned(),
-                    ))
-                }
-            }
-
-            AMEND_ACCOUNT_BALANCE => {
-                if self.transact_set_balance(&(params.data.to_owned().unwrap())) {
-                    Ok(result)
-                } else {
-                    Err(evm::error::Error::Internal(
-                        "Account doesn't exist or incomplete trie error".to_owned(),
-                    ))
-                }
-            }
-
-            _ => Ok(result),
-        }
+        Ok(result)
+//        let atype = params.value.value().low_u32();
+//        let mut result = FinalizationResult {
+//            gas_left: params.gas,
+//            apply_state: true,
+//            return_data: ReturnData::empty(),
+//        };
+//        match atype {
+//            AMEND_ABI => {
+//                if self.transact_set_abi(&(params.data.to_owned().unwrap())) {
+//                    Ok(result)
+//                } else {
+//                    Err(evm::error::Error::Internal(
+//                        "Account doesn't exist".to_owned(),
+//                    ))
+//                }
+//            }
+//            AMEND_CODE => {
+//                if self.transact_set_code(&(params.data.to_owned().unwrap())) {
+//                    Ok(result)
+//                } else {
+//                    Err(evm::error::Error::Internal(
+//                        "Account doesn't exist".to_owned(),
+//                    ))
+//                }
+//            }
+//            AMEND_KV_H256 => {
+//                if self.transact_set_kv_h256(&(params.data.to_owned().unwrap())) {
+//                    Ok(result)
+//                } else {
+//                    Err(evm::error::Error::Internal(
+//                        "Account doesn't exist".to_owned(),
+//                    ))
+//                }
+//            }
+//            AMEND_GET_KV_H256 => {
+//                if let Some(v) = self.transact_get_kv_h256(&(params.data.to_owned().unwrap())) {
+//                    let data = v.to_vec();
+//                    let size = data.len();
+//                    result.return_data = ReturnData::new(data, 0, size);
+//                    Ok(result)
+//                } else {
+//                    Err(evm::error::Error::Internal(
+//                        "May be incomplete trie error".to_owned(),
+//                    ))
+//                }
+//            }
+//
+//            AMEND_ACCOUNT_BALANCE => {
+//                if self.transact_set_balance(&(params.data.to_owned().unwrap())) {
+//                    Ok(result)
+//                } else {
+//                    Err(evm::error::Error::Internal(
+//                        "Account doesn't exist or incomplete trie error".to_owned(),
+//                    ))
+//                }
+//            }
+//
+//            _ => Ok(result),
+//        }
     }
 
     fn call_grpc_contract(
