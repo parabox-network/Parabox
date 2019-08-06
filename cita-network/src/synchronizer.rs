@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 use std::u8;
 use tentacle::SessionId;
 
-const SYNC_STEP: u64 = 20;
+const SYNC_STEP: u64 = 500;
 const SYNC_TIME_OUT: u64 = 9;
 
 /// Get messages and determine if need to synchronize or broadcast the current node status
