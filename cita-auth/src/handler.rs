@@ -162,7 +162,7 @@ impl MsgHandler {
     }
 
     pub fn verify_tx_quota(&self, quota: u64, signer: &[u8]) -> bool {
-        if quota > self.config_info.block_quota_limit {
+        if quota * 50 > self.config_info.block_quota_limit {
             return false;
         }
         if self.config_info.check_quota {
