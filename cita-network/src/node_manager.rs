@@ -1020,7 +1020,7 @@ impl DealRichStatusReq {
 
     pub fn handle(mut self, service: &mut NodesManager) {
         let rich_status = self.msg.take_rich_status().unwrap();
-        info!("DealRichStatusReq rich status {:?}", rich_status);
+        trace!("DealRichStatusReq rich status {:?}", rich_status);
 
         let validators: BTreeSet<Address> = rich_status
             .get_validators()
