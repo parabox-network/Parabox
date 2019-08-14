@@ -16,7 +16,6 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use cita_types::{clean_0x, Address};
-use logger::info;
 use serde_derive::Deserialize;
 use std::fs::File;
 use std::io::Read;
@@ -29,6 +28,7 @@ pub struct NetConfig {
     pub peers: Option<Vec<PeerConfig>>,
     pub max_connects: Option<usize>,
     pub enable_tls: Option<bool>,
+    pub enable_discovery: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -94,5 +94,6 @@ mod tests {
         assert_eq!(config.max_connects, Some(4));
         assert_eq!(config.enable_tls, Some(true));
         assert_eq!(config.peers.unwrap().len(), 2);
+        assert_eq!(config.enable_discovery, None);
     }
 }

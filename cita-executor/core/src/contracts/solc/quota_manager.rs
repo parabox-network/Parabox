@@ -1,5 +1,5 @@
 // CITA
-// Copyright 2016-2018 Cryptape Technologies LLC.
+// Copyright 2016-2019 Cryptape Technologies LLC.
 
 // This program is free software: you can redistribute it
 // and/or modify it under the terms of the GNU General Public
@@ -18,15 +18,15 @@
 //! Quota manager.
 
 use super::ContractCallExt;
+use crate::contracts::tools::{decode as decode_tools, method as method_tools};
+use crate::libexecutor::executor::Executor;
+use crate::types::ids::BlockId;
+use crate::types::reserved_addresses;
 use cita_types::traits::LowerHex;
 use cita_types::{Address, H160};
-use contracts::tools::{decode as decode_tools, method as method_tools};
-use libexecutor::executor::Executor;
 use libproto::blockchain::AccountGasLimit as ProtoAccountQuotaLimit;
 use std::collections::HashMap;
 use std::str::FromStr;
-use types::ids::BlockId;
-use types::reserved_addresses;
 
 const QUOTAS: &[u8] = &*b"getQuotas()";
 const ACCOUNTS: &[u8] = &*b"getAccounts()";
@@ -121,7 +121,7 @@ impl<'a> QuotaManager<'a> {
     }
 
     pub fn default_quota() -> Vec<u64> {
-        error!("Use default quota.");
+        info!("Use default quota.");
         Vec::new()
     }
 
@@ -139,7 +139,7 @@ impl<'a> QuotaManager<'a> {
     }
 
     pub fn default_users() -> Vec<Address> {
-        error!("Use default users.");
+        info!("Use default users.");
         Vec::new()
     }
 
@@ -152,7 +152,7 @@ impl<'a> QuotaManager<'a> {
     }
 
     pub fn default_block_quota_limit() -> u64 {
-        error!("Use default block quota limit.");
+        info!("Use default block quota limit.");
         BQL_VALUE
     }
 
@@ -170,7 +170,7 @@ impl<'a> QuotaManager<'a> {
     }
 
     pub fn default_account_quota_limit() -> u64 {
-        error!("Use default account quota limit.");
+        info!("Use default account quota limit.");
         AQL_VALUE
     }
 
@@ -188,44 +188,36 @@ impl<'a> QuotaManager<'a> {
     }
 
     pub fn default_auto_exec_quota_limit() -> u64 {
-        error!("Use default auto exec quota limit.");
+        info!("Use default auto exec quota limit.");
         AUTO_EXEC_QL_VALUE
     }
 }
 
 #[cfg(test)]
 mod tests {
-    extern crate logger;
+    extern crate cita_logger as logger;
 
     use super::{QuotaManager, AQL_VALUE, AUTO_EXEC_QL_VALUE, BQL_VALUE};
+    use crate::tests::helpers::init_executor;
+    use crate::types::ids::BlockId;
     use cita_types::H160;
     use std::str::FromStr;
-    use tests::helpers::init_executor;
-    use types::ids::BlockId;
 
     #[test]
     fn test_users() {
-        let executor = init_executor(vec![
-            ((
-                "QuotaManager.admin",
-                "0xd3f1a71d1d8f073f4e725f57bbe14d67da22f888",
-            )),
-        ]);
-        println!("init executor finish");
+        let executor = init_executor();
 
         let quota_management = QuotaManager::new(&executor);
         let users = quota_management.users(BlockId::Pending).unwrap();
         assert_eq!(
             users,
-            vec![H160::from_str("d3f1a71d1d8f073f4e725f57bbe14d67da22f888").unwrap()]
+            vec![H160::from_str("4b5ae4567ad5d9fb92bc9afd6a657e6fa13a2523").unwrap()]
         );
     }
 
     #[test]
     fn test_quota() {
-        let executor = init_executor(vec![]);
-        println!("init executor finish");
-
+        let executor = init_executor();
         let quota_management = QuotaManager::new(&executor);
 
         // Test quota

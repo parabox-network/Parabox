@@ -27,14 +27,14 @@ use std::sync::Arc;
 use super::io::{LooseReader, LooseWriter, SnapshotReader, SnapshotWriter};
 use super::{BlockRebuilder, ManifestData, RestorationStatus, StateRebuilder};
 
-use error::Error;
+use crate::error::Error;
 
+use crate::libexecutor::executor::Executor;
 use cita_types::H256;
-use libexecutor::executor::Executor;
 
-use cita_db::journaldb::Algorithm;
-use cita_db::kvdb::{Database, DatabaseConfig, KeyValueDB};
-use cita_db::TrieError;
+use crate::cita_db::journaldb::Algorithm;
+use crate::cita_db::kvdb::{Database, DatabaseConfig, KeyValueDB};
+use crate::cita_db::TrieError;
 use snappy;
 use util::Bytes;
 use util::UtilError;
@@ -363,7 +363,7 @@ impl Service {
         trace!("finalizing restoration");
 
         // destroy the restoration before replacing databases and snapshot.
-        rest.take().map(|r| r.finalize()).unwrap_or(Ok(()))?;
+        rest.take().map(Restoration::finalize).unwrap_or(Ok(()))?;
 
         *self.status.lock() = RestorationStatus::Inactive;
         Ok(())
@@ -470,27 +470,11 @@ impl SnapshotService for Service {
         *cur_status
     }
 
-    /*
-    fn begin_restore(&self, manifest: ManifestData) {
-        if let Err(e) = self.io_channel.lock().send(ClientIoMessage::BeginRestoration(manifest)) {
-            trace!("Error sending snapshot service message: {:?}", e);
-        }
-    }
-    */
-
     fn abort_restore(&self) {
         self.restoring_snapshot.store(false, Ordering::SeqCst);
         *self.restoration.lock() = None;
         *self.status.lock() = RestorationStatus::Inactive;
     }
-
-    /*
-    fn restore_state_chunk(&self, hash: H256, chunk: Bytes) {
-        if let Err(e) = self.io_channel.lock().send(ClientIoMessage::FeedStateChunk(hash, chunk)) {
-            trace!("Error sending snapshot service message: {:?}", e);
-        }
-    }
-    */
 }
 /// The interface for a snapshot network service.
 /// This handles:

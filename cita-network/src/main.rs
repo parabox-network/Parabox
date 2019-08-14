@@ -79,6 +79,9 @@
 //! [`network_message_to_pubsub_message`]: ./citaprotocol/fn.network_message_to_pubsub_message.html
 //!
 
+#[macro_use]
+extern crate cita_logger as logger;
+
 pub mod cita_protocol;
 pub mod config;
 pub mod mq_agent;
@@ -92,21 +95,23 @@ use crate::mq_agent::MqAgent;
 use crate::network::Network;
 use crate::node_manager::{NodesManager, DEFAULT_PORT};
 use crate::p2p_protocol::{
-    node_discovery::DiscoveryProtocolMeta, node_discovery::NodesAddressManager,
-    node_discovery::DISCOVERY_PROTOCOL_ID, transfer::TransferProtocolMeta,
-    transfer::TRANSFER_PROTOCOL_ID, SHandle,
+    node_discovery::create_discovery_meta, transfer::create_transfer_meta, SHandle,
 };
 use crate::synchronizer::Synchronizer;
 use clap::App;
 use dotenv;
 use futures::prelude::*;
-use logger::{debug, info};
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use std::path::Path;
+use std::sync::mpsc::channel;
 use std::thread;
 use tentacle::{builder::ServiceBuilder, secio::SecioKeyPair};
 use util::micro_service_init;
 use util::set_panic_handler;
 
 include!(concat!(env!("OUT_DIR"), "/build_info.rs"));
+
+const NOTIFY_DELAY_SECS: u64 = 1;
 
 fn main() {
     // init app
@@ -126,12 +131,29 @@ fn main() {
     micro_service_init!("cita-network", "CITA:network", stdout);
     info!("Version: {}", get_build_info_str(true));
 
-    let config_path = matches.value_of("config").unwrap_or("network.toml");
+    let config_file = matches.value_of("config").unwrap_or("network.toml");
+
+    let config_path = Path::new(config_file);
+    let mut dir = config_path
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
+        .to_str()
+        .unwrap();
+    if dir.is_empty() {
+        dir = ".";
+    }
+    let fname = config_path
+        .file_name()
+        .expect("Wrong config file")
+        .to_str()
+        .unwrap()
+        .to_string()
+        .clone();
 
     // Init config
     debug!("Config path {:?}", config_path);
-    let config = NetConfig::new(&config_path);
-    debug!("Network config is {:?}", config);
+    let config = NetConfig::new(&config_file);
+    debug!("Network config is {:?}", config_file);
 
     let addr_path = matches.value_of("address").unwrap_or("address");
     let own_addr = AddressConfig::new(&addr_path);
@@ -149,22 +171,27 @@ fn main() {
     mq_agent.set_nodes_mgr_client(nodes_mgr.client());
     mq_agent.set_network_client(network_mgr.client());
 
-    // Init p2p protocols
-    let discovery_meta = DiscoveryProtocolMeta::new(
-        DISCOVERY_PROTOCOL_ID,
-        NodesAddressManager::new(nodes_mgr.client()),
-    );
-    let transfer_meta = TransferProtocolMeta::new(
-        TRANSFER_PROTOCOL_ID,
-        network_mgr.client(),
-        nodes_mgr.client(),
-    );
-
+    let transfer_meta =
+        create_transfer_meta(network_mgr.client(), nodes_mgr.client(), own_addr.addr);
     let mut service_cfg = ServiceBuilder::default()
-        .insert_protocol(discovery_meta)
         .insert_protocol(transfer_meta)
         .forever(true);
-    if nodes_mgr.is_enable_tls() {
+
+    let discovery_flag = config.enable_discovery.unwrap_or(true);
+    let (tx, rx) = channel();
+    let mut watcher: RecommendedWatcher =
+        Watcher::new(tx, std::time::Duration::from_secs(NOTIFY_DELAY_SECS)).unwrap();
+    if discovery_flag {
+        let discovery_meta = create_discovery_meta(nodes_mgr.client());
+        service_cfg = service_cfg.insert_protocol(discovery_meta);
+    } else if watcher.watch(dir, RecursiveMode::NonRecursive).is_ok() {
+        let notify_client = nodes_mgr.client();
+        thread::spawn(move || {
+            NodesManager::notify_config_change(rx, notify_client, fname);
+        });
+    }
+
+    if config.enable_tls.unwrap_or(false) {
         service_cfg = service_cfg.key_pair(SecioKeyPair::secp256k1_generated());
     }
     let mut service = service_cfg.build(SHandle::new(nodes_mgr.client()));

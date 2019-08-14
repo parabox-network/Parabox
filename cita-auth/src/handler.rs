@@ -1,5 +1,5 @@
 // CITA
-// Copyright 2016-2018 Cryptape Technologies LLC.
+// Copyright 2016-2019 Cryptape Technologies LLC.
 
 // This program is free software: you can redistribute it
 // and/or modify it under the terms of the GNU General Public
@@ -15,17 +15,20 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use block_txn::{BlockTxnMessage, BlockTxnReq};
-use block_verify::BlockVerify;
+use crate::block_txn::{BlockTxnMessage, BlockTxnReq};
+use crate::block_verify::BlockVerify;
+use crate::config::Config;
+use crate::dispatcher::Dispatcher;
+use crate::history::HistoryHeights;
+use crate::transaction_verify::Error;
 use cita_types::traits::LowerHex;
 use cita_types::{clean_0x, Address, H256, U256};
 use crypto::{pubkey_to_address, PubKey, Sign, Signature, SIGNATURE_BYTES_LEN};
-use dispatcher::Dispatcher;
 use error::ErrorCode;
-use history::HistoryHeights;
+use evm::Schedule;
 use jsonrpc_types::rpc_types::TxResponse;
-use libproto::auth::{Miscellaneous, MiscellaneousReq};
-use libproto::blockchain::{AccountGasLimit, SignedTransaction};
+use libproto::auth::{BalanceVerifyRes, BalanceVerifyTransaction, Miscellaneous, MiscellaneousReq};
+use libproto::blockchain::{AccountGasLimit, SignedTransaction, Transaction};
 use libproto::router::{MsgType, RoutingKey, SubModules};
 use libproto::snapshot::{Cmd, Resp, SnapshotReq, SnapshotResp};
 use libproto::{
@@ -42,7 +45,6 @@ use std::collections::{HashMap, HashSet};
 use std::convert::Into;
 use std::str::FromStr;
 use std::time::Duration;
-use transaction_verify::Error;
 use util::BLOCKLIMIT;
 
 const TX_OK: &str = "OK";
@@ -90,6 +92,7 @@ pub struct MsgHandler {
     history_hashes: HashMap<u64, HashSet<H256>>,
     dispatcher: Dispatcher,
     tx_request: Sender<Request>,
+    tx_balance_verify_tx: Sender<BalanceVerifyTransaction>,
     tx_pool_limit: usize,
     is_snapshot: bool,
     black_list_cache: HashMap<Address, i8>,
@@ -105,24 +108,24 @@ impl MsgHandler {
         tx_pub: Sender<(String, Vec<u8>)>,
         dispatcher: Dispatcher,
         tx_request: Sender<Request>,
-        tx_pool_limit: usize,
-        tx_verify_thread_num: usize,
-        tx_verify_cache_size: usize,
+        tx_balance_verify_tx: Sender<BalanceVerifyTransaction>,
+        config: Config,
     ) -> Self {
         ThreadPoolBuilder::new()
-            .num_threads(tx_verify_thread_num)
+            .num_threads(config.tx_verify_thread_num)
             .build_global()
             .unwrap();
         MsgHandler {
             rx_sub,
             tx_pub,
-            cache: LruCache::new(tx_verify_cache_size),
+            cache: LruCache::new(config.tx_verify_cache_size),
             chain_id: None,
             history_heights: HistoryHeights::new(),
             history_hashes: HashMap::with_capacity(BLOCKLIMIT as usize),
             dispatcher,
             tx_request,
-            tx_pool_limit,
+            tx_balance_verify_tx,
+            tx_pool_limit: config.tx_pool_limit,
             is_snapshot: false,
             black_list_cache: HashMap::new(),
             is_need_proposal_new_block: false,
@@ -159,7 +162,7 @@ impl MsgHandler {
     }
 
     pub fn verify_tx_quota(&self, quota: u64, signer: &[u8]) -> bool {
-        if quota > self.config_info.block_quota_limit {
+        if quota * 50 > self.config_info.block_quota_limit {
             return false;
         }
         if self.config_info.check_quota {
@@ -183,7 +186,7 @@ impl MsgHandler {
         true
     }
 
-    // verify to and version
+    // verify to and version and min quota
     fn verify_request(&self, req: &Request) -> Result<(), Error> {
         let un_tx = req.get_un_tx();
         let tx = un_tx.get_transaction();
@@ -200,7 +203,7 @@ impl MsgHandler {
             if !to.is_empty() && Address::from_str(to).is_err() {
                 return Err(Error::InvalidValue);
             }
-        } else if tx_version == 1 {
+        } else if tx_version < 3 {
             // old to must be empty
             if !tx.get_to().is_empty() {
                 return Err(Error::InvalidValue);
@@ -213,6 +216,10 @@ impl MsgHandler {
         } else {
             error!("unexpected version {}!", tx_version);
             return Err(Error::InvalidValue);
+        }
+
+        if !verify_base_quota_required(tx) {
+            return Err(Error::QuotaNotEnough);
         }
 
         Ok(())
@@ -247,7 +254,7 @@ impl MsgHandler {
                     Some(ChainId::V0(chain_id))
                 }
             }
-            1 => {
+            version if version < 3 => {
                 // old chain id must be empty
                 if req.get_chain_id() != 0 || req.get_chain_id_v1().len() != 32 {
                     None
@@ -361,6 +368,40 @@ impl MsgHandler {
         let _ = self.tx_request.send(tx_req);
     }
 
+    fn send_balance_verify_req(&self, bv_tx: BalanceVerifyTransaction) {
+        let _ = self.tx_balance_verify_tx.send(bv_tx);
+    }
+
+    fn handle_balance_verify_res(&self, bv_res: BalanceVerifyRes) {
+        for bv_result in bv_res.bv_results.iter() {
+            let bv_tx = bv_result.get_bv_tx();
+            let is_local = bv_tx.get_is_local();
+            let request_id = bv_tx.get_request_id().to_vec();
+            if bv_result.get_passed() {
+                let signed_tx = bv_tx.get_signed_tx();
+                self.accept_tx_req(signed_tx, request_id, is_local);
+            } else if is_local {
+                self.publish_tx_failed_result(request_id.clone(), &Error::Forbidden);
+            }
+        }
+    }
+
+    fn accept_tx_req(&self, signed_tx: &SignedTransaction, request_id: Vec<u8>, is_local: bool) {
+        if self.dispatcher.add_tx_to_pool(&signed_tx) {
+            if is_local {
+                self.publish_tx_success_result(request_id.clone(), signed_tx.get_tx_hash().into());
+            }
+            // new tx need forward to other nodes
+            let mut tx_req = Request::new();
+            tx_req.set_request_id(request_id);
+            tx_req.set_un_tx(signed_tx.get_transaction_with_sig().clone());
+            self.forward_request(tx_req);
+        } else if is_local {
+            // dup with transaction in tx pool
+            self.publish_tx_failed_result(request_id, &Error::Dup);
+        }
+    }
+
     fn send_single_block_tx_hashes_req(&mut self, height: u64) {
         let mut req = BlockTxHashesReq::new();
         req.set_height(height);
@@ -393,21 +434,128 @@ impl MsgHandler {
         self.history_heights.update_time_stamp();
     }
 
+    fn daily_task(&mut self) {
+        if self.is_need_proposal_new_block && self.is_ready() {
+            self.dispatcher.proposal_tx_list(
+                (self.history_heights.next_height() - 1) as usize, // todo fix bft
+                &self.tx_pub,
+                &self.config_info,
+            );
+            // after proposal new block clear flag
+            self.is_need_proposal_new_block = false;
+        }
+    }
+
+    fn get_chain_id(&mut self) {
+        if self.chain_id.is_none() && self.config_info.version.is_some() {
+            trace!("chain id is not ready");
+            let msg: Message = MiscellaneousReq::new().into();
+            if let Ok(rabbit_mq_msg) = msg.try_into() {
+                if let Err(e) = self
+                    .tx_pub
+                    .send((routing_key!(Auth >> MiscellaneousReq).into(), rabbit_mq_msg))
+                {
+                    error!("Send MiscellaneousReq message error {:?}", e);
+                }
+            } else {
+                error!("Can not get rabbit mq message from MiscellaneousReq.");
+            }
+        }
+    }
+
+    fn process_msg(&mut self) {
+        if let Ok((key, payload)) = self.rx_sub.recv_timeout(Duration::new(3, 0)) {
+            if Message::try_from(&payload).is_err() {
+                error!("Can not get message from payload {:?}", &payload);
+                return;
+            }
+
+            let mut msg = Message::try_from(&payload).unwrap();
+            let rounting_key = RoutingKey::from(&key);
+            trace!("process message key = {}", key);
+            match rounting_key {
+                // we got this message when chain reach new height or response the BlockTxHashesReq
+                routing_key!(Chain >> BlockTxHashes) => {
+                    if let Some(block_tx_hashes) = msg.take_block_tx_hashes() {
+                        self.deal_block_tx_hashes(&block_tx_hashes)
+                    } else {
+                        error!("Can not get block tx hashes from message {:?}.", msg);
+                    }
+                }
+                routing_key!(Executor >> BlackList) => {
+                    if let Some(black_list) = msg.take_black_list() {
+                        self.deal_black_list(&black_list);
+                    } else {
+                        error!("Can not get black list from message {:?}.", msg);
+                    }
+                }
+                routing_key!(Net >> Request) | routing_key!(Jsonrpc >> RequestNewTxBatch) => {
+                    if let Some(newtx_req) = msg.take_request() {
+                        let is_local = rounting_key.is_sub_module(SubModules::Jsonrpc);
+                        self.deal_request(is_local, newtx_req);
+                    } else {
+                        error!("Can not get request from message {:?}.", msg);
+                    }
+                }
+                routing_key!(Executor >> BalanceVerifyRes) => {
+                    if let Some(bv_res) = msg.take_balance_verify_res() {
+                        self.handle_balance_verify_res(bv_res);
+                    } else {
+                        error!("Can not get balance verify res from message {:?}.", msg);
+                    }
+                }
+                routing_key!(Executor >> Miscellaneous) => {
+                    if let Some(miscellaneous) = msg.take_miscellaneous() {
+                        self.deal_miscellaneous(&miscellaneous);
+                    } else {
+                        error!("Can not get miscellaneous from message {:?}.", msg);
+                    }
+                }
+                routing_key!(Snapshot >> SnapshotReq) => {
+                    if let Some(snapshot_req) = msg.take_snapshot_req() {
+                        self.deal_snapshot(&snapshot_req);
+                    } else {
+                        error!("Can not get snapshot from message {:?}.", msg);
+                    }
+                }
+                routing_key!(Net >> GetBlockTxn) => {
+                    if let Some(mut get_block_txn) = msg.take_get_block_txn() {
+                        let origin = msg.get_origin();
+                        self.deal_get_block_txn(&mut get_block_txn, origin);
+                    } else {
+                        error!("Can not get block txn from message {:?}.", msg);
+                    }
+                }
+                // Compact proposal
+                routing_key!(Consensus >> VerifyBlockReq) => {
+                    if !self.is_ready() {
+                        info!("Net/Consensus >> CompactProposal: auth is not ready");
+                    } else {
+                        self.deal_signed_proposal(msg);
+                    }
+                }
+                routing_key!(Net >> BlockTxn) => {
+                    if !self.is_ready() || self.verify_block_req.is_none() {
+                        info!("Net >> BlockTxn: auth is not ready");
+                    } else {
+                        let verify_block_req = self.verify_block_req.clone();
+                        if let Some(verify_block_req) = verify_block_req {
+                            self.deal_block_txn(msg, verify_block_req);
+                        }
+                    }
+                }
+                _ => {
+                    error!("receive unexpected message key {}", key);
+                }
+            }
+        }
+    }
     pub fn handle_remote_msg(&mut self) {
         loop {
             // send request to get chain id if we have not got it
             // chain id need version
             // so get chain id after get version
-            if self.chain_id.is_none() && self.config_info.version.is_some() {
-                trace!("chain id is not ready");
-                let msg: Message = MiscellaneousReq::new().into();
-                self.tx_pub
-                    .send((
-                        routing_key!(Auth >> MiscellaneousReq).into(),
-                        msg.try_into().unwrap(),
-                    ))
-                    .unwrap();
-            }
+            self.get_chain_id();
 
             // block hashes of some height we not have
             // we will send request for these height
@@ -417,74 +565,10 @@ impl MsgHandler {
             }
 
             // Daily tasks
-            {
-                if self.is_need_proposal_new_block && self.is_ready() {
-                    self.dispatcher.proposal_tx_list(
-                        (self.history_heights.next_height() - 1) as usize, // todo fix bft
-                        &self.tx_pub,
-                        &self.config_info,
-                    );
-                    // after proposal new block clear flag
-                    self.is_need_proposal_new_block = false;
-                }
-            }
+            self.daily_task();
 
             // process message from MQ
-            if let Ok((key, payload)) = self.rx_sub.recv_timeout(Duration::new(3, 0)) {
-                let mut msg = Message::try_from(&payload).unwrap();
-                let rounting_key = RoutingKey::from(&key);
-                trace!("process message key = {}", key);
-                match rounting_key {
-                    // we got this message when chain reach new height or response the BlockTxHashesReq
-                    routing_key!(Chain >> BlockTxHashes) => {
-                        let block_tx_hashes = msg.take_block_tx_hashes().unwrap();
-                        self.deal_block_tx_hashes(&block_tx_hashes)
-                    }
-                    routing_key!(Executor >> BlackList) => {
-                        let black_list = msg.take_black_list().unwrap();
-                        self.deal_black_list(&black_list);
-                    }
-                    routing_key!(Net >> Request) | routing_key!(Jsonrpc >> RequestNewTxBatch) => {
-                        let is_local = rounting_key.is_sub_module(SubModules::Jsonrpc);
-                        let newtx_req = msg.take_request().unwrap();
-                        self.deal_request(is_local, newtx_req);
-                    }
-                    routing_key!(Executor >> Miscellaneous) => {
-                        let miscellaneous = msg.take_miscellaneous().unwrap();
-                        self.deal_miscellaneous(&miscellaneous);
-                    }
-                    routing_key!(Snapshot >> SnapshotReq) => {
-                        let snapshot_req = msg.take_snapshot_req().unwrap();
-                        self.deal_snapshot(&snapshot_req);
-                    }
-                    routing_key!(Net >> GetBlockTxn) => {
-                        let mut get_block_txn = msg.take_get_block_txn().unwrap();
-                        let origin = msg.get_origin();
-                        self.deal_get_block_txn(&mut get_block_txn, origin);
-                    }
-                    // Compact proposal
-                    routing_key!(Consensus >> VerifyBlockReq) => {
-                        if !self.is_ready() {
-                            info!("Net/Consensus >> CompactProposal: auth is not ready");
-                        } else {
-                            self.deal_signed_proposal(msg);
-                        }
-                    }
-                    routing_key!(Net >> BlockTxn) => {
-                        if !self.is_ready() || self.verify_block_req.is_none() {
-                            info!("Net >> BlockTxn: auth is not ready");
-                        } else {
-                            let verify_block_req = self.verify_block_req.clone();
-                            if let Some(verify_block_req) = verify_block_req {
-                                self.deal_block_txn(msg, verify_block_req);
-                            }
-                        }
-                    }
-                    _ => {
-                        error!("receive unexpected message key {}", key);
-                    }
-                }
-            }
+            self.process_msg();
         }
     }
 
@@ -510,7 +594,10 @@ impl MsgHandler {
             } else {
                 Some(Address::from(block_tx_hashes.get_admin_address()))
             };
-            if block_tx_hashes.get_version() == 1 && self.config_info.version == Some(0) {
+            let block_tx_version = block_tx_hashes.get_version();
+            let check_version = block_tx_version > 0 && block_tx_version < 3;
+            // Get chain id according to version
+            if check_version && self.config_info.version == Some(0) {
                 trace!("Fetch new chain id");
                 let msg: Message = MiscellaneousReq::new().into();
                 self.tx_pub
@@ -698,16 +785,14 @@ impl MsgHandler {
                     signed_tx.set_signer(req.get_signer().to_vec());
                     signed_tx.set_tx_hash(tx_hash.to_vec());
                     let request_id = tx_req.get_request_id().to_vec();
-                    if self.dispatcher.add_tx_to_pool(&signed_tx) {
-                        if is_local {
-                            self.publish_tx_success_result(request_id, tx_hash);
-                        }
-                        // new tx need forward to other nodes
-                        self.forward_request(tx_req.clone());
-                    } else if is_local {
-                        // dup with transaction in tx pool
-                        self.publish_tx_failed_result(request_id, &Error::Dup);
-                    }
+
+                    let mut bv_tx = BalanceVerifyTransaction::new();
+                    bv_tx.set_is_local(is_local);
+                    bv_tx.set_request_id(request_id);
+                    bv_tx.set_signed_tx(signed_tx);
+                    let address = pubkey_to_address(&PubKey::from_slice(req.get_signer()));
+                    bv_tx.set_sender(address.to_vec());
+                    self.send_balance_verify_req(bv_tx);
                 });
         } else if newtx_req.has_un_tx() {
             trace!("get single new tx request from Jsonrpc");
@@ -786,16 +871,14 @@ impl MsgHandler {
             signed_tx.set_transaction_with_sig(newtx_req.get_un_tx().clone());
             signed_tx.set_signer(req.get_signer().to_vec());
             signed_tx.set_tx_hash(tx_hash.to_vec());
-            if self.dispatcher.add_tx_to_pool(&signed_tx) {
-                if is_local {
-                    self.publish_tx_success_result(request_id, tx_hash);
-                }
-                // new tx need forward to other nodes
-                self.forward_request(newtx_req);
-            } else if is_local {
-                // dup with transaction in tx pool
-                self.publish_tx_failed_result(request_id, &Error::Dup);
-            }
+
+            let mut bv_tx = BalanceVerifyTransaction::new();
+            bv_tx.set_is_local(is_local);
+            bv_tx.set_request_id(request_id);
+            bv_tx.set_signed_tx(signed_tx);
+            let address = pubkey_to_address(&PubKey::from_slice(req.get_signer()));
+            bv_tx.set_sender(address.to_vec());
+            self.send_balance_verify_req(bv_tx);
         }
     }
 
@@ -838,7 +921,7 @@ impl MsgHandler {
         if let Some(version) = self.config_info.version {
             self.chain_id = if version == 0 {
                 Some(ChainId::V0(miscellaneous.chain_id))
-            } else if version == 1 {
+            } else if version < 3 {
                 if miscellaneous.chain_id_v1.len() == 32 {
                     Some(ChainId::V1(U256::from(
                         miscellaneous.chain_id_v1.as_slice(),
@@ -1050,4 +1133,22 @@ fn snapshot_response(sender: &Sender<(String, Vec<u8>)>, ack: Resp, flag: bool) 
             (&msg).try_into().unwrap(),
         ))
         .unwrap();
+}
+
+// only verify if tx.version > 2
+pub fn verify_base_quota_required(tx: &Transaction) -> bool {
+    match tx.get_version() {
+        0...1 => true,
+        _ => {
+            let schedule = Schedule::new_v1();
+            let to = tx.get_to_v1();
+            if to.is_empty() || Address::from(to) == Address::zero() {
+                tx.get_quota() as usize
+                    >= tx.data.len() * schedule.tx_data_non_zero_gas + schedule.tx_create_gas
+            } else {
+                tx.get_quota() as usize
+                    >= tx.data.len() * schedule.tx_data_non_zero_gas + schedule.tx_gas
+            }
+        }
+    }
 }

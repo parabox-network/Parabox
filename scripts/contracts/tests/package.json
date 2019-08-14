@@ -4,9 +4,9 @@
   "description": "CITA contract test using web3",
   "main": "",
   "devDependencies": {
-    "eslint": "^5.15.2",
+    "eslint": "^5.16.0",
     "eslint-config-airbnb-base": "^13.1.0",
-    "eslint-plugin-import": "^2.16.0"
+    "eslint-plugin-import": "^2.17.2"
   },
   "scripts": {
     "unit_group": "eslint test/unit/group.js && mocha test/unit/group.js -t 20s --exit",
@@ -27,6 +27,8 @@
     "batch_tx": "eslint test/integrate/batch_tx.js && mocha test/integrate/batch_tx.js -t 20s --exit",
     "permission": "eslint test/integrate/permission.js && mocha test/integrate/permission.js -t 20s --exit",
     "auto_exec": "eslint test/integrate/auto_exec.js && mocha test/integrate/auto_exec.js -t 20s --exit",
+    "lifetime": "eslint test/integrate/lifetime.js && mocha test/integrate/lifetime.js -t 20s --exit",
+    "unit_vm": "eslint test/unit/version_manager.js && mocha test/unit/version_manager.js -t 20s --exit",
     "lint": "eslint test",
     "lint-fix": "eslint --fix test"
   },
@@ -34,9 +36,9 @@
   "author": "Cryptape Technologies <contact@cryptape.com>",
   "license": "GPL-3.0+",
   "dependencies": {
-    "@cryptape/cita-sdk": "^0.21.2",
+    "@cryptape/cita-sdk": "^0.23.1",
     "chai": "^4.2.0",
-    "log4js": "^4.0.2",
-    "mocha": "^6.0.2"
+    "log4js": "^4.1.0",
+    "mocha": "^6.1.4"
   }
 }

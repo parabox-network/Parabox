@@ -1,5 +1,5 @@
 // CITA
-// Copyright 2016-2018 Cryptape Technologies LLC.
+// Copyright 2016-2019 Cryptape Technologies LLC.
 
 // This program is free software: you can redistribute it
 // and/or modify it under the terms of the GNU General Public
@@ -15,9 +15,10 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use crate::handler::SysConfigInfo;
+use crate::txwal::TxWal;
 use cita_types::traits::LowerHex;
 use cita_types::{Address, H256};
-use handler::SysConfigInfo;
 use libproto::blockchain::{AccountGasLimit, BlockBody, BlockTxs, SignedTransaction};
 use libproto::router::{MsgType, RoutingKey, SubModules};
 use libproto::Message;
@@ -28,7 +29,6 @@ use std::collections::HashSet;
 use std::convert::Into;
 use std::thread;
 use tx_pool;
-use txwal::TxWal;
 
 pub struct Dispatcher {
     txs_pool: RefCell<tx_pool::Pool>,
@@ -153,11 +153,7 @@ impl Dispatcher {
 
     pub fn get_txs(&self, ids: &[H256]) -> Vec<SignedTransaction> {
         let pool = self.txs_pool.borrow();
-        ids.iter()
-            .map(|id| pool.get(id).cloned())
-            .filter(|tx| tx.is_some())
-            .map(|tx| tx.unwrap())
-            .collect()
+        ids.iter().filter_map(|id| pool.get(id).cloned()).collect()
     }
 
     pub fn check_missing(&self, ids: Vec<H256>) -> Vec<H256> {

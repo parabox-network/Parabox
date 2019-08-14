@@ -17,7 +17,8 @@
 
 use crate::mq_agent::{MqAgentClient, PubMessage};
 use crate::node_manager::{
-    BroadcastReq, GetPeerCountReq, GetPeersInfoReq, NodesManagerClient, SingleTxReq,
+    BroadcastReq, DealRichStatusReq, GetPeerCountReq, GetPeersInfoReq, NodesManagerClient,
+    SingleTxReq,
 };
 use crate::synchronizer::{SynchronizerClient, SynchronizerMessage};
 use jsonrpc_types::rpc_types::PeersInfo;
@@ -27,9 +28,9 @@ use libproto::routing_key;
 use libproto::snapshot::{Cmd, Resp, SnapshotResp};
 use libproto::{Message as ProtoMessage, OperateType, Response};
 use libproto::{TryFrom, TryInto};
-use logger::{error, info, trace, warn};
 use pubsub::channel::{unbounded, Receiver, Sender};
 use serde_json;
+use std::iter::FromIterator;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -137,6 +138,11 @@ impl LocalMessage {
                     .sync_client
                     .handle_local_status(SynchronizerMessage::new(self.key, self.data));
             }
+            routing_key!(Chain >> RichStatus) => {
+                let msg = ProtoMessage::try_from(&self.data).unwrap();
+                let req = DealRichStatusReq::new(msg);
+                service.nodes_mgr_client.deal_rich_status(req);
+            }
             routing_key!(Chain >> SyncResponse) => {
                 let msg = ProtoMessage::try_from(&self.data).unwrap();
                 send_message(
@@ -215,7 +221,7 @@ impl LocalMessage {
 
                     let peers_info = PeersInfo {
                         amount: peers.len() as u32,
-                        peers: Some(peers),
+                        peers: Some(std::collections::HashMap::from_iter(peers)),
                         error_message: None,
                     };
 
@@ -354,8 +360,8 @@ pub fn send_message(nodes_mgr_client: &NodesManagerClient, key: String, msg: Pro
             nodes_mgr_client.broadcast(BroadcastReq::new(key, msg));
         }
         OperateType::Single => {
-            let dst = msg.get_origin();
-            nodes_mgr_client.send_message(SingleTxReq::new(dst as usize, key, msg));
+            let dst = msg.get_origin() as usize;
+            nodes_mgr_client.send_message(SingleTxReq::new(dst.into(), key, msg));
         }
         OperateType::Subtract => {
             // FIXME: Support subtract broadcast if necessary, just use broadcast instead.

@@ -1,5 +1,5 @@
 // CITA
-// Copyright 2016-2018 Cryptape Technologies LLC.
+// Copyright 2016-2019 Cryptape Technologies LLC.
 
 // This program is free software: you can redistribute it
 // and/or modify it under the terms of the GNU General Public
@@ -15,18 +15,19 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use crate::core::contracts::solc::sys_config::ChainId;
+use crate::core::libexecutor::blacklist::BlackList;
+use crate::core::libexecutor::block::{ClosedBlock, OpenBlock};
+use crate::core::libexecutor::call_request::CallRequest;
+use crate::core::libexecutor::economical_model::EconomicalModel;
+use crate::core::libexecutor::estimate::EstimateRequest;
+use crate::core::receipt::ReceiptError;
+use crate::types::ids::BlockId;
 use cita_types::{Address, H160, H256, U256};
-use core::contracts::solc::sys_config::ChainId;
-use core::libexecutor::blacklist::BlackList;
-use core::libexecutor::block::{ClosedBlock, OpenBlock};
-use core::libexecutor::call_request::CallRequest;
-use core::libexecutor::economical_model::EconomicalModel;
-use core::libexecutor::estimate::EstimateRequest;
-use core::receipt::ReceiptError;
 use crossbeam_channel::{Receiver, Sender};
 use error::ErrorCode;
 use jsonrpc_types::rpc_types::{BlockNumber, CountOrCode, ReceiptEx};
-use libproto::auth::Miscellaneous;
+use libproto::auth::{BalanceVerifyReq, BalanceVerifyRes, BalanceVerifyResult, Miscellaneous};
 use libproto::blockchain::{RichStatus, StateSignal};
 use libproto::request::Request_oneof_req as Request;
 use libproto::router::{MsgType, RoutingKey, SubModules};
@@ -37,10 +38,9 @@ use serde_json;
 use std::convert::Into;
 use std::sync::RwLock;
 use std::u8;
-use types::ids::BlockId;
 
-use core::libexecutor::command;
-use core::libexecutor::lru_cache::LRUCache;
+use crate::core::libexecutor::command;
+use crate::core::libexecutor::lru_cache::LRUCache;
 use evm::Schedule;
 
 use super::backlogs::{wrap_height, Backlogs};
@@ -173,6 +173,12 @@ impl Postman {
         match RoutingKey::from(key) {
             routing_key!(Auth >> MiscellaneousReq) => {
                 self.reply_auth_miscellaneous();
+            }
+
+            routing_key!(Auth >> BalanceVerifyReq) => {
+                if let Some(bv_req) = msg.take_balance_verify_req() {
+                    self.reply_auth_request(bv_req);
+                }
             }
 
             routing_key!(Chain >> Request) => {
@@ -470,6 +476,50 @@ impl Postman {
         );
     }
 
+    fn reply_auth_request(&self, bv_req: BalanceVerifyReq) {
+        let opt_quota_price =
+            command::current_quota_price(&self.command_req_sender, &self.command_resp_receiver);
+
+        let result: Vec<BalanceVerifyResult> = bv_req
+            .bv_txs
+            .into_iter()
+            .map(|bv_tx| {
+                let mut bv_result = BalanceVerifyResult::new();
+
+                if let Some(quota_price) = opt_quota_price {
+                    let address = Address::from(bv_tx.get_sender());
+                    if let Some(balance) = command::balance_at(
+                        &self.command_req_sender,
+                        &self.command_resp_receiver,
+                        address,
+                        BlockId::Pending,
+                    ) {
+                        let quota = bv_tx.get_signed_tx().get_transaction().get_quota();
+                        bv_result.set_passed(
+                            U256::from(balance.as_slice()) >= U256::from(quota) * quota_price,
+                        );
+                    } else {
+                        bv_result.set_passed(false);
+                    }
+                } else {
+                    bv_result.set_passed(false);
+                }
+
+                bv_result.set_bv_tx(bv_tx);
+                bv_result
+            })
+            .collect();
+
+        let mut bv_res = BalanceVerifyRes::new();
+        bv_res.set_bv_results(result.into());
+
+        let msg: Message = bv_res.into();
+        self.response_mq(
+            routing_key!(Executor >> BalanceVerifyRes).into(),
+            msg.try_into().unwrap(),
+        );
+    }
+
     fn reply_chain_request(&self, mut req: request::Request) {
         let mut response = response::Response::new();
         response.set_request_id(req.take_request_id());
@@ -509,17 +559,17 @@ impl Postman {
                             &self.command_req_sender,
                             &self.command_resp_receiver,
                             estimate_request,
-                            block_id.into()
+                            block_id.into(),
                         )
-                            .map(|ok| {
-                                let mut bytes = [0u8; 32];
-                                ok.to_big_endian(&mut bytes);
-                                response.set_estimate_gas(bytes.to_vec());
-                            })
-                            .map_err(|err| {
-                                response.set_code(ErrorCode::query_error());
-                                response.set_error_msg(err);
-                            })
+                        .map(|ok| {
+                            let mut bytes = [0u8; 32];
+                            ok.to_big_endian(&mut bytes);
+                            response.set_estimate_gas(bytes.to_vec());
+                        })
+                        .map_err(|err| {
+                            response.set_code(ErrorCode::query_error());
+                            response.set_error_msg(err);
+                        })
                     })
                     .map_err(|err| {
                         response.set_code(ErrorCode::query_error());
@@ -822,8 +872,8 @@ impl Postman {
 mod tests {
     use self::helpers::generate_executed_result;
     use super::*;
+    use crate::tests::helpers;
     use libproto::Message;
-    use tests::helpers;
 
     #[test]
     fn test_bootstrap_broadcast_at_0th() {
@@ -1170,48 +1220,160 @@ mod tests {
     }
 
     #[test]
-    fn test_update_rich_status_with_prune() {
-        let mut postman = helpers::generate_postman(6, Default::default());
+    fn test_update_rich_status_0() {
+        let mut postman = helpers::generate_postman(5, Default::default());
 
-        let execute_result_1 = generate_executed_result(1);
-        let execute_result_2 = generate_executed_result(2);
-        let execute_result_3 = generate_executed_result(3);
-        let execute_result_4 = generate_executed_result(4);
-
-        postman
-            .backlogs
-            .insert_completed_result(1, execute_result_1);
-        postman
-            .backlogs
-            .insert_completed_result(2, execute_result_2);
-        postman
-            .backlogs
-            .insert_completed_result(3, execute_result_3);
-        postman
-            .backlogs
-            .insert_completed_result(4, execute_result_4);
+        backlogs_prepare(&mut postman);
 
         let mut rich_status = RichStatus::new();
-        rich_status.set_height(2);
-        // chain height = 2, executor height = 6
-        // 3 + 2 < 6, executor backlogs will prune executed result which height <= 2
+
+        rich_status.set_height(0);
+
         postman.update_by_rich_status(&rich_status);
 
+        // block height in rich_status is from Chain, that means database's block height.
+        // block height in postman, that means executed block height which cache in Executor.
+        // Testcase 0: block_height[chain] = 0, block_height[executor] = 5.
+        // Expected: remove the block 0 from cache, but not other block.
+        assert!(postman.backlogs.get_completed_result(0).is_none());
+        assert!(postman.backlogs.get_completed_result(1).is_some());
+        assert!(postman.backlogs.get_completed_result(2).is_some());
+        assert!(postman.backlogs.get_completed_result(3).is_some());
+        assert!(postman.backlogs.get_completed_result(4).is_some());
+        assert!(postman.backlogs.get_completed_result(5).is_some());
+    }
+
+    #[test]
+    fn test_update_rich_status_1() {
+        let mut postman = helpers::generate_postman(5, Default::default());
+
+        backlogs_prepare(&mut postman);
+
+        let mut rich_status = RichStatus::new();
+
+        rich_status.set_height(1);
+
+        postman.update_by_rich_status(&rich_status);
+
+        // block height in rich_status is from Chain, that means database's block height.
+        // block height in postman, that means executed block height which cache in Executor.
+        // Testcase 0: block_height[chain] = 1, block_height[executor] = 5.
+        // Expected: remove the block 0, 1 from cache, but not other block.
+        assert!(postman.backlogs.get_completed_result(0).is_none());
+        assert!(postman.backlogs.get_completed_result(1).is_none());
+        assert!(postman.backlogs.get_completed_result(2).is_some());
+        assert!(postman.backlogs.get_completed_result(3).is_some());
+        assert!(postman.backlogs.get_completed_result(4).is_some());
+        assert!(postman.backlogs.get_completed_result(5).is_some());
+    }
+
+    #[test]
+    fn test_update_rich_status_2() {
+        let mut postman = helpers::generate_postman(5, Default::default());
+
+        backlogs_prepare(&mut postman);
+
+        let mut rich_status = RichStatus::new();
+
+        rich_status.set_height(2);
+
+        postman.update_by_rich_status(&rich_status);
+
+        // block height in rich_status is from Chain, that means database's block height.
+        // block height in postman, that means executed block height which cache in Executor.
+        // Testcase 0: block_height[chain] = 2, block_height[executor] = 5.
+        // Expected: remove the block 0, 1, 2 from cache, but not other block.
+        assert!(postman.backlogs.get_completed_result(0).is_none());
         assert!(postman.backlogs.get_completed_result(1).is_none());
         assert!(postman.backlogs.get_completed_result(2).is_none());
         assert!(postman.backlogs.get_completed_result(3).is_some());
         assert!(postman.backlogs.get_completed_result(4).is_some());
+        assert!(postman.backlogs.get_completed_result(5).is_some());
     }
 
     #[test]
-    fn test_update_rich_status_without_prune() {
+    fn test_update_rich_status_3() {
         let mut postman = helpers::generate_postman(5, Default::default());
 
+        backlogs_prepare(&mut postman);
+
+        let mut rich_status = RichStatus::new();
+
+        rich_status.set_height(3);
+
+        postman.update_by_rich_status(&rich_status);
+
+        // block height in rich_status is from Chain, that means database's block height.
+        // block height in postman, that means executed block height which cache in Executor.
+        // Testcase 0: block_height[chain] = 3, block_height[executor] = 5.
+        // Expected: postman needs to keep at least 3 block in cache, so remove the block 0, 1, 2 from cache, but not other block.
+        assert!(postman.backlogs.get_completed_result(0).is_none());
+        assert!(postman.backlogs.get_completed_result(1).is_none());
+        assert!(postman.backlogs.get_completed_result(2).is_none());
+        assert!(postman.backlogs.get_completed_result(3).is_some());
+        assert!(postman.backlogs.get_completed_result(4).is_some());
+        assert!(postman.backlogs.get_completed_result(5).is_some());
+    }
+
+    #[test]
+    fn test_update_rich_status_4() {
+        let mut postman = helpers::generate_postman(5, Default::default());
+
+        backlogs_prepare(&mut postman);
+
+        let mut rich_status = RichStatus::new();
+
+        rich_status.set_height(4);
+
+        postman.update_by_rich_status(&rich_status);
+
+        // block height in rich_status is from Chain, that means database's block height.
+        // block height in postman, that means executed block height which cache in Executor.
+        // Testcase 0: block_height[chain] = 3, block_height[executor] = 5.
+        // Expected: postman needs to keep at least 3 block in cache, so remove the block 0, 1, 2 from cache, but not other block.
+        assert!(postman.backlogs.get_completed_result(0).is_none());
+        assert!(postman.backlogs.get_completed_result(1).is_none());
+        assert!(postman.backlogs.get_completed_result(2).is_none());
+        assert!(postman.backlogs.get_completed_result(3).is_some());
+        assert!(postman.backlogs.get_completed_result(4).is_some());
+        assert!(postman.backlogs.get_completed_result(5).is_some());
+    }
+
+    #[test]
+    fn test_update_rich_status_5() {
+        let mut postman = helpers::generate_postman(5, Default::default());
+
+        backlogs_prepare(&mut postman);
+
+        let mut rich_status = RichStatus::new();
+
+        rich_status.set_height(5);
+
+        postman.update_by_rich_status(&rich_status);
+
+        // block height in rich_status is from Chain, that means database's block height.
+        // block height in postman, that means executed block height which cache in Executor.
+        // Testcase 0: block_height[chain] = 3, block_height[executor] = 5.
+        // Expected: postman needs to keep at least 3 block in cache, so remove the block 0, 1, 2 from cache, but not other block.
+        assert!(postman.backlogs.get_completed_result(0).is_none());
+        assert!(postman.backlogs.get_completed_result(1).is_none());
+        assert!(postman.backlogs.get_completed_result(2).is_none());
+        assert!(postman.backlogs.get_completed_result(3).is_some());
+        assert!(postman.backlogs.get_completed_result(4).is_some());
+        assert!(postman.backlogs.get_completed_result(5).is_some());
+    }
+
+    fn backlogs_prepare(postman: &mut Postman) {
+        let execute_result_0 = generate_executed_result(0);
         let execute_result_1 = generate_executed_result(1);
         let execute_result_2 = generate_executed_result(2);
         let execute_result_3 = generate_executed_result(3);
         let execute_result_4 = generate_executed_result(4);
+        let execute_result_5 = generate_executed_result(5);
 
+        postman
+            .backlogs
+            .insert_completed_result(0, execute_result_0);
         postman
             .backlogs
             .insert_completed_result(1, execute_result_1);
@@ -1224,15 +1386,8 @@ mod tests {
         postman
             .backlogs
             .insert_completed_result(4, execute_result_4);
-
-        let mut rich_status = RichStatus::new();
-        rich_status.set_height(2);
-        // chain height = 2, executor height = 5
-        // 3 + 2 = 5, not < 5, so executor backlogs will not prune
-        postman.update_by_rich_status(&rich_status);
-
-        assert!(postman.backlogs.get_completed_result(1).is_some());
-        assert!(postman.backlogs.get_completed_result(2).is_some());
-        assert!(postman.backlogs.get_completed_result(3).is_some());
+        postman
+            .backlogs
+            .insert_completed_result(5, execute_result_5);
     }
 }

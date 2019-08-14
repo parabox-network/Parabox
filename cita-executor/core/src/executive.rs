@@ -16,10 +16,9 @@
 
 //! Transaction Execution environment.
 
-use authentication::check_permission;
-use builtin::Builtin;
-use cita_types::{Address, H160, H256, U256, U512};
-use contracts::{
+use crate::authentication::check_permission;
+use crate::builtin::Builtin;
+use crate::contracts::{
     grpc::{
         self,
         contract::{
@@ -30,30 +29,31 @@ use contracts::{
     },
     native::factory::{Contract as NativeContract, Factory as NativeFactory},
 };
+use crate::engines::Engine;
+use crate::error::ExecutionError;
+pub use crate::executed::{Executed, ExecutionResult};
+use crate::externalities::*;
+use crate::libexecutor::economical_model::EconomicalModel;
+use crate::libexecutor::sys_config::BlockSysConfig;
+use crate::state::backend::Backend as StateBackend;
+use crate::state::{State, Substate};
+use crate::trace::{
+    ExecutiveTracer, ExecutiveVMTracer, FlatTrace, NoopTracer, NoopVMTracer, Tracer, VMTrace,
+    VMTracer,
+};
+use crate::types::reserved_addresses;
+use crate::types::transaction::{Action, SignedTransaction};
+use cita_types::{Address, H160, U256, U512};
 use crossbeam;
-use engines::Engine;
-use error::ExecutionError;
 use evm::action_params::{ActionParams, ActionValue};
 use evm::call_type::CallType;
 use evm::env_info::EnvInfo;
 use evm::{self, Factory, FinalizationResult, Finalize, ReturnData, Schedule};
-pub use executed::{Executed, ExecutionResult};
-use externalities::*;
 use hashable::{Hashable, HASH_EMPTY};
-use libexecutor::economical_model::EconomicalModel;
-use libexecutor::sys_config::BlockSysConfig;
-use state::backend::Backend as StateBackend;
-use state::{State, Substate};
 use std::cmp;
 use std::error::Error;
 use std::str::FromStr;
 use std::sync::Arc;
-use trace::{
-    ExecutiveTracer, ExecutiveVMTracer, FlatTrace, NoopTracer, NoopVMTracer, Tracer, VMTrace,
-    VMTracer,
-};
-use types::reserved_addresses;
-use types::transaction::{Action, SignedTransaction};
 use util::*;
 
 /// Roughly estimate what stack size each level of evm depth will use
@@ -62,6 +62,8 @@ use util::*;
 /// Maybe something like here:
 /// `https://github.com/ethereum/libethereum/blob/4db169b8504f2b87f7d5a481819cfb959fc65f6c/libethereum/ExtVM.cpp`
 const STACK_SIZE_PER_DEPTH: usize = 24 * 1024;
+const ADD_TRANSFER_BALANCE_LOG_HIGHT: u64 = 205000;
+const REMOVE_TRANSFER_BALANCE_0_LOG_HIGHT: u64 = 206000;
 
 thread_local! {
     /// Stack size
@@ -72,16 +74,16 @@ thread_local! {
             |s| s.parse().ok()).unwrap_or(2 * 1024 * 1024));
 }
 
-///amend the abi data
-const AMEND_ABI: u32 = 1;
-///amend the account code
-const AMEND_CODE: u32 = 2;
-///amend the kv of db
-const AMEND_KV_H256: u32 = 3;
-///amend get the value of db
-const AMEND_GET_KV_H256: u32 = 4;
-///amend account's balance
-const AMEND_ACCOUNT_BALANCE: u32 = 5;
+/////amend the abi data
+//const AMEND_ABI: u32 = 1;
+/////amend the account code
+//const AMEND_CODE: u32 = 2;
+/////amend the kv of db
+//const AMEND_KV_H256: u32 = 3;
+/////amend get the value of db
+//const AMEND_GET_KV_H256: u32 = 4;
+/////amend account's balance
+//const AMEND_ACCOUNT_BALANCE: u32 = 5;
 
 /// Returns new address created from address and given nonce.
 pub fn contract_address(address: &Address, nonce: &U256) -> Address {
@@ -113,6 +115,7 @@ pub struct Executive<'a, B: 'a + StateBackend> {
     native_factory: &'a NativeFactory,
     /// Check EconomicalModel
     economical_model: EconomicalModel,
+    chain_version: u32,
 }
 
 impl<'a, B: 'a + StateBackend> Executive<'a, B> {
@@ -126,6 +129,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
         native_factory: &'a NativeFactory,
         static_flag: bool,
         economical_model: EconomicalModel,
+        chain_version: u32,
     ) -> Self {
         Executive {
             state,
@@ -136,6 +140,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
             depth: 0,
             static_flag,
             economical_model,
+            chain_version,
         }
     }
 
@@ -154,6 +159,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
         parent_depth: usize,
         static_flag: bool,
         economical_model: EconomicalModel,
+        chain_version: u32,
     ) -> Self {
         Executive {
             state,
@@ -164,6 +170,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
             depth: parent_depth + 1,
             static_flag,
             economical_model,
+            chain_version,
         }
     }
 
@@ -198,6 +205,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
             vm_tracer,
             is_static,
             economical_model,
+            self.chain_version,
         )
     }
 
@@ -235,54 +243,54 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
             .unwrap_or(false)
     }
 
-    fn transact_set_code(&mut self, data: &[u8]) -> bool {
-        let account = H160::from(&data[0..20]);
-        let code = &data[20..];
-        self.state.reset_code(&account, code.to_vec()).is_ok()
-    }
-
-    fn transact_set_balance(&mut self, data: &[u8]) -> bool {
-        if data.len() < 52 {
-            return false;
-        }
-        let account = H160::from(&data[0..20]);
-        let balance = U256::from(&data[20..52]);
-        self.state
-            .balance(&account)
-            .and_then(|now_val| {
-                if now_val >= balance {
-                    self.state.sub_balance(&account, &(now_val - balance))
-                } else {
-                    self.state.add_balance(&account, &(balance - now_val))
-                }
-            })
-            .is_ok()
-    }
-
-    fn transact_set_kv_h256(&mut self, data: &[u8]) -> bool {
-        let len = data.len();
-        if len < 84 {
-            return false;
-        }
-        let loop_num: usize = (len - 20) / (32 * 2);
-        let account = H160::from(&data[0..20]);
-
-        for i in 0..loop_num {
-            let base = 20 + 32 * 2 * i;
-            let key = H256::from_slice(&data[base..base + 32]);
-            let val = H256::from_slice(&data[base + 32..base + 32 * 2]);
-            if self.state.set_storage(&account, key, val).is_err() {
-                return false;
-            }
-        }
-        true
-    }
-
-    fn transact_get_kv_h256(&mut self, data: &[u8]) -> Option<H256> {
-        let account = H160::from(&data[0..20]);
-        let key = H256::from_slice(&data[20..52]);
-        self.state.storage_at(&account, &key).ok()
-    }
+    //    fn transact_set_code(&mut self, data: &[u8]) -> bool {
+    //        let account = H160::from(&data[0..20]);
+    //        let code = &data[20..];
+    //        self.state.reset_code(&account, code.to_vec()).is_ok()
+    //    }
+    //
+    //    fn transact_set_balance(&mut self, data: &[u8]) -> bool {
+    //        if data.len() < 52 {
+    //            return false;
+    //        }
+    //        let account = H160::from(&data[0..20]);
+    //        let balance = U256::from(&data[20..52]);
+    //        self.state
+    //            .balance(&account)
+    //            .and_then(|now_val| {
+    //                if now_val >= balance {
+    //                    self.state.sub_balance(&account, &(now_val - balance))
+    //                } else {
+    //                    self.state.add_balance(&account, &(balance - now_val))
+    //                }
+    //            })
+    //            .is_ok()
+    //    }
+    //
+    //    fn transact_set_kv_h256(&mut self, data: &[u8]) -> bool {
+    //        let len = data.len();
+    //        if len < 84 {
+    //            return false;
+    //        }
+    //        let loop_num: usize = (len - 20) / (32 * 2);
+    //        let account = H160::from(&data[0..20]);
+    //
+    //        for i in 0..loop_num {
+    //            let base = 20 + 32 * 2 * i;
+    //            let key = H256::from_slice(&data[base..base + 32]);
+    //            let val = H256::from_slice(&data[base + 32..base + 32 * 2]);
+    //            if self.state.set_storage(&account, key, val).is_err() {
+    //                return false;
+    //            }
+    //        }
+    //        true
+    //    }
+    //
+    //    fn transact_get_kv_h256(&mut self, data: &[u8]) -> Option<H256> {
+    //        let account = H160::from(&data[0..20]);
+    //        let key = H256::from_slice(&data[20..52]);
+    //        self.state.storage_at(&account, &key).ok()
+    //    }
 
     pub fn transact_with_tracer<T, V>(
         &'a mut self,
@@ -336,16 +344,6 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
                 return Err(ExecutionError::NoTransactionPermission);
             }
         }
-
-        /*trace!("quota should be checked: {}", options.check_quota);
-        if options.check_quota {
-            check_quota(
-                self.info.gas_used,
-                self.info.gas_limit,
-                self.info.account_gas_limit,
-                t,
-            )?;
-        }*/
 
         if t.action == Action::AbiStore && !self.transact_set_abi(&t.data) {
             return Err(ExecutionError::TransactionMalformed(
@@ -598,7 +596,36 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
         // TODO Keep it for compatibility. Remove it later.
         if let (true, ActionValue::Transfer(val)) = (self.payment_required(), &params.value) {
             self.state
-                .transfer_balance(&params.sender, &params.address, &val)?
+                .transfer_balance(&params.sender, &params.address, &val)?;
+
+            let mut log_transfer = || {
+                use crate::log_entry::LogEntry;
+
+                let address = params.address.clone();
+                let topics = vec![
+                    0xb3ce904a.into(),
+                    params.sender.clone().into(),
+                    params.address.clone().into(),
+                ];
+                let mut arr = [0u8; 32];
+                val.to_big_endian(&mut arr);
+                let data = arr.to_vec();
+                substate.logs.push(LogEntry {
+                    address,
+                    topics,
+                    data,
+                });
+            };
+
+            if self.info.number >= ADD_TRANSFER_BALANCE_LOG_HIGHT
+                && self.info.number < REMOVE_TRANSFER_BALANCE_0_LOG_HIGHT
+            {
+                log_transfer();
+            } else if self.info.number >= REMOVE_TRANSFER_BALANCE_0_LOG_HIGHT {
+                if *val > U256::from(0) {
+                    log_transfer();
+                }
+            }
         }
 
         if let Some(native_contract) = self.native_factory.new_contract(params.code_address) {
@@ -666,65 +693,71 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
         if Some(params.origin) != self.state.super_admin_account {
             return Err(evm::error::Error::Internal("no permission".to_owned()));
         }
-        let atype = params.value.value().low_u32();
-        let mut result = FinalizationResult {
+        let result = FinalizationResult {
             gas_left: params.gas,
             apply_state: true,
             return_data: ReturnData::empty(),
         };
-        match atype {
-            AMEND_ABI => {
-                if self.transact_set_abi(&(params.data.to_owned().unwrap())) {
-                    Ok(result)
-                } else {
-                    Err(evm::error::Error::Internal(
-                        "Account doesn't exist".to_owned(),
-                    ))
-                }
-            }
-            AMEND_CODE => {
-                if self.transact_set_code(&(params.data.to_owned().unwrap())) {
-                    Ok(result)
-                } else {
-                    Err(evm::error::Error::Internal(
-                        "Account doesn't exist".to_owned(),
-                    ))
-                }
-            }
-            AMEND_KV_H256 => {
-                if self.transact_set_kv_h256(&(params.data.to_owned().unwrap())) {
-                    Ok(result)
-                } else {
-                    Err(evm::error::Error::Internal(
-                        "Account doesn't exist".to_owned(),
-                    ))
-                }
-            }
-            AMEND_GET_KV_H256 => {
-                if let Some(v) = self.transact_get_kv_h256(&(params.data.to_owned().unwrap())) {
-                    let data = v.to_vec();
-                    let size = data.len();
-                    result.return_data = ReturnData::new(data, 0, size);
-                    Ok(result)
-                } else {
-                    Err(evm::error::Error::Internal(
-                        "May be incomplete trie error".to_owned(),
-                    ))
-                }
-            }
-
-            AMEND_ACCOUNT_BALANCE => {
-                if self.transact_set_balance(&(params.data.to_owned().unwrap())) {
-                    Ok(result)
-                } else {
-                    Err(evm::error::Error::Internal(
-                        "Account doesn't exist or incomplete trie error".to_owned(),
-                    ))
-                }
-            }
-
-            _ => Ok(result),
-        }
+        Ok(result)
+        //        let atype = params.value.value().low_u32();
+        //        let mut result = FinalizationResult {
+        //            gas_left: params.gas,
+        //            apply_state: true,
+        //            return_data: ReturnData::empty(),
+        //        };
+        //        match atype {
+        //            AMEND_ABI => {
+        //                if self.transact_set_abi(&(params.data.to_owned().unwrap())) {
+        //                    Ok(result)
+        //                } else {
+        //                    Err(evm::error::Error::Internal(
+        //                        "Account doesn't exist".to_owned(),
+        //                    ))
+        //                }
+        //            }
+        //            AMEND_CODE => {
+        //                if self.transact_set_code(&(params.data.to_owned().unwrap())) {
+        //                    Ok(result)
+        //                } else {
+        //                    Err(evm::error::Error::Internal(
+        //                        "Account doesn't exist".to_owned(),
+        //                    ))
+        //                }
+        //            }
+        //            AMEND_KV_H256 => {
+        //                if self.transact_set_kv_h256(&(params.data.to_owned().unwrap())) {
+        //                    Ok(result)
+        //                } else {
+        //                    Err(evm::error::Error::Internal(
+        //                        "Account doesn't exist".to_owned(),
+        //                    ))
+        //                }
+        //            }
+        //            AMEND_GET_KV_H256 => {
+        //                if let Some(v) = self.transact_get_kv_h256(&(params.data.to_owned().unwrap())) {
+        //                    let data = v.to_vec();
+        //                    let size = data.len();
+        //                    result.return_data = ReturnData::new(data, 0, size);
+        //                    Ok(result)
+        //                } else {
+        //                    Err(evm::error::Error::Internal(
+        //                        "May be incomplete trie error".to_owned(),
+        //                    ))
+        //                }
+        //            }
+        //
+        //            AMEND_ACCOUNT_BALANCE => {
+        //                if self.transact_set_balance(&(params.data.to_owned().unwrap())) {
+        //                    Ok(result)
+        //                } else {
+        //                    Err(evm::error::Error::Internal(
+        //                        "Account doesn't exist or incomplete trie error".to_owned(),
+        //                    ))
+        //                }
+        //            }
+        //
+        //            _ => Ok(result),
+        //        }
     }
 
     fn call_grpc_contract(
@@ -999,8 +1032,6 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
         let mut unconfirmed_substate = Substate::new();
 
         // create contract and transfer value to it if necessary
-        /*let schedule = self.engine.schedule(self.info);
-        let nonce_offset = if schedule.no_empty {1} else {0}.into();*/
         let nonce_offset = U256::from(0);
         let prev_bal = self.state.balance(&params.address)?;
         // TODO Keep it for compatibility. Remove it later.
@@ -1065,9 +1096,6 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
         chain_owner: Address,
         fee_back_platform: bool,
     ) -> ExecutionResult {
-        /*
-        let schedule = self.engine.schedule(self.info);
-         */
         let schedule = Schedule::new_v1();
         // refunds from SSTORE nonzero -> zero
         let sstore_refunds = U256::from(schedule.sstore_refund_gas) * substate.sstore_clears_count;
@@ -1219,27 +1247,27 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 
 #[cfg(test)]
 mod tests {
-    extern crate logger;
+    extern crate cita_logger as logger;
     extern crate rustc_hex;
     ////////////////////////////////////////////////////////////////////////////////
 
     use self::rustc_hex::FromHex;
     use super::*;
+    use crate::engines::NullEngine;
+    use crate::libexecutor::sys_config::BlockSysConfig;
+    use crate::state::Substate;
+    use crate::tests::helpers::*;
+    use crate::trace::{ExecutiveTracer, ExecutiveVMTracer};
+    use crate::types::transaction::Transaction;
     use cita_crypto::{CreateKey, KeyPair};
     use cita_types::{Address, H256, U256};
-    use engines::NullEngine;
     use evm::action_params::{ActionParams, ActionValue};
     use evm::env_info::EnvInfo;
     use evm::Schedule;
     use evm::{Factory, VMType};
-    use libexecutor::sys_config::BlockSysConfig;
-    use state::Substate;
     use std::ops::Deref;
     use std::str::FromStr;
     use std::sync::Arc;
-    use tests::helpers::*;
-    use trace::{ExecutiveTracer, ExecutiveVMTracer};
-    use types::transaction::Transaction;
 
     #[test]
     fn test_transfer_for_store() {
@@ -1255,7 +1283,7 @@ mod tests {
             nonce: U256::zero().to_string(),
             block_limit: 100u64,
             chain_id: 1.into(),
-            version: 1,
+            version: 2,
         }
         .fake_sign(keypair.address().clone());
         let sender = t.sender();
@@ -1279,6 +1307,7 @@ mod tests {
                 &native_factory,
                 false,
                 EconomicalModel::Charge,
+                0,
             );
             let opts = TransactOptions {
                 tracing: false,
@@ -1313,7 +1342,7 @@ mod tests {
             nonce: U256::zero().to_string(),
             block_limit: 100u64,
             chain_id: 1.into(),
-            version: 1,
+            version: 2,
         }
         .fake_sign(keypair.address().clone());
         let sender = t.sender();
@@ -1328,6 +1357,7 @@ mod tests {
             .unwrap();
         let mut info = EnvInfo::default();
         info.gas_limit = U256::from(100_000);
+        let conf = BlockSysConfig::default();
 
         let executed = {
             let mut ex = Executive::new(
@@ -1338,12 +1368,13 @@ mod tests {
                 &native_factory,
                 false,
                 EconomicalModel::Charge,
+                conf.chain_version,
             );
             let opts = TransactOptions {
                 tracing: false,
                 vm_tracing: false,
             };
-            ex.transact(&t, opts, &BlockSysConfig::default()).unwrap()
+            ex.transact(&t, opts, &conf).unwrap()
         };
 
         let schedule = Schedule::new_v1();
@@ -1375,7 +1406,7 @@ mod tests {
             nonce: U256::zero().to_string(),
             block_limit: 100u64,
             chain_id: 1.into(),
-            version: 1,
+            version: 2,
         }
         .fake_sign(keypair.address().clone());
 
@@ -1386,6 +1417,7 @@ mod tests {
         state.add_balance(t.sender(), &U256::from(100_042)).unwrap();
         let mut info = EnvInfo::default();
         info.gas_limit = U256::from(100_000);
+        let conf = BlockSysConfig::default();
 
         let result = {
             let mut ex = Executive::new(
@@ -1396,12 +1428,13 @@ mod tests {
                 &native_factory,
                 false,
                 EconomicalModel::Charge,
+                conf.chain_version,
             );
             let opts = TransactOptions {
                 tracing: false,
                 vm_tracing: false,
             };
-            ex.transact(&t, opts, &BlockSysConfig::default())
+            ex.transact(&t, opts, &conf)
         };
 
         match result {
@@ -1426,7 +1459,7 @@ mod tests {
             nonce: U256::zero().to_string(),
             block_limit: 100u64,
             chain_id: 1.into(),
-            version: 1,
+            version: 2,
         }
         .fake_sign(keypair.address().clone());
 
@@ -1436,6 +1469,7 @@ mod tests {
         let mut state = get_temp_state();
         let mut info = EnvInfo::default();
         info.gas_limit = U256::from(100_000);
+        let conf = BlockSysConfig::default();
 
         let result = {
             let mut ex = Executive::new(
@@ -1446,12 +1480,13 @@ mod tests {
                 &native_factory,
                 false,
                 EconomicalModel::Quota,
+                conf.chain_version,
             );
             let opts = TransactOptions {
                 tracing: false,
                 vm_tracing: false,
             };
-            ex.transact(&t, opts, &BlockSysConfig::default())
+            ex.transact(&t, opts, &conf)
         };
 
         assert!(result.is_ok());
@@ -1495,6 +1530,7 @@ contract HelloWorld {
         let mut substate = Substate::new();
         let mut tracer = ExecutiveTracer::default();
         let mut vm_tracer = ExecutiveVMTracer::toplevel();
+        let conf = BlockSysConfig::default();
 
         let mut ex = Executive::new(
             &mut state,
@@ -1504,6 +1540,7 @@ contract HelloWorld {
             &native_factory,
             false,
             EconomicalModel::Quota,
+            conf.chain_version,
         );
         let res = ex.create(&params, &mut substate, &mut tracer, &mut vm_tracer);
         assert!(res.is_err());
@@ -1549,6 +1586,7 @@ contract AbiTest {
         let mut substate = Substate::new();
         let mut tracer = ExecutiveTracer::default();
         let mut vm_tracer = ExecutiveVMTracer::toplevel();
+        let conf = BlockSysConfig::default();
 
         {
             let mut ex = Executive::new(
@@ -1559,6 +1597,7 @@ contract AbiTest {
                 &native_factory,
                 false,
                 EconomicalModel::Quota,
+                conf.chain_version,
             );
             let _ = ex.create(&params, &mut substate, &mut tracer, &mut vm_tracer);
         }
@@ -1612,6 +1651,8 @@ contract AbiTest {
         let info = EnvInfo::default();
         let engine = NullEngine::default();
         let mut substate = Substate::new();
+        let conf = BlockSysConfig::default();
+
         {
             let mut ex = Executive::new(
                 &mut state,
@@ -1621,6 +1662,7 @@ contract AbiTest {
                 &native_factory,
                 false,
                 EconomicalModel::Quota,
+                conf.chain_version,
             );
             let mut out = vec![];
             let _ = ex.call(
@@ -1690,6 +1732,8 @@ contract AbiTest {
         let info = EnvInfo::default();
         let engine = NullEngine::default();
         let mut substate = Substate::new();
+        let conf = BlockSysConfig::default();
+
         {
             let mut ex = Executive::new(
                 &mut state,
@@ -1699,6 +1743,7 @@ contract AbiTest {
                 &native_factory,
                 false,
                 EconomicalModel::Quota,
+                conf.chain_version,
             );
             let mut out = vec![];
             let res = ex.call(
@@ -1773,6 +1818,8 @@ contract AbiTest {
         let info = EnvInfo::default();
         let engine = NullEngine::default();
         let mut substate = Substate::new();
+        let conf = BlockSysConfig::default();
+
         {
             let mut ex = Executive::new(
                 &mut state,
@@ -1782,6 +1829,7 @@ contract AbiTest {
                 &native_factory,
                 false,
                 EconomicalModel::Quota,
+                conf.chain_version,
             );
             let mut out = vec![];
             let res = ex.call(
@@ -1872,6 +1920,8 @@ contract FakePermissionManagement {
         let info = EnvInfo::default();
         let engine = NullEngine::default();
         let mut substate = Substate::new();
+        let conf = BlockSysConfig::default();
+
         {
             let mut ex = Executive::new(
                 &mut state,
@@ -1881,6 +1931,7 @@ contract FakePermissionManagement {
                 &native_factory,
                 false,
                 EconomicalModel::Quota,
+                conf.chain_version,
             );
             let mut out = vec![];
             let res = ex.call(

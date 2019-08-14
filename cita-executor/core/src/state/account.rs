@@ -19,18 +19,20 @@
 
 //! Single account in the system.
 
-use cita_db::{trie, DBValue, HashDB, Trie, TrieFactory};
+use crate::cita_db::{trie, DBValue, HashDB, Trie, TrieFactory};
+use crate::pod_account::*;
+use crate::types::basic_account::BasicAccount;
 use cita_types::traits::LowerHex;
 use cita_types::{Address, H256, U256};
 use hashable::{Hashable, HASH_EMPTY, HASH_NULL_RLP};
 use lru_cache::LruCache;
-use pod_account::*;
 use rlp::*;
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::convert::Into;
 use std::fmt;
 use std::sync::Arc;
-use types::basic_account::BasicAccount;
 use util::*;
 
 const STORAGE_CACHE_ITEMS: usize = 8192;
@@ -132,9 +134,9 @@ impl Account {
             storage_root: HASH_NULL_RLP,
             storage_cache: Self::empty_storage_cache(),
             storage_changes: pod.storage.into_iter().collect(),
-            code_hash: pod.code.as_ref().map_or(HASH_EMPTY, |c| c.crypt_hash()),
+            code_hash: pod.code.as_ref().map_or(HASH_EMPTY, Hashable::crypt_hash),
             code_filth: Filth::Dirty,
-            code_size: Some(pod.code.as_ref().map_or(0, |c| c.len())),
+            code_size: Some(pod.code.as_ref().map_or(0, Vec::len)),
             code_cache: Arc::new(pod.code.map_or_else(
                 || {
                     warn!("POD account with unknown code is being created! Assuming no code.");
@@ -142,9 +144,9 @@ impl Account {
                 },
                 |c| c,
             )),
-            abi_hash: pod.abi.as_ref().map_or(HASH_EMPTY, |c| c.crypt_hash()),
+            abi_hash: pod.abi.as_ref().map_or(HASH_EMPTY, Hashable::crypt_hash),
             abi_filth: Filth::Dirty,
-            abi_size: Some(pod.abi.as_ref().map_or(0, |c| c.len())),
+            abi_size: Some(pod.abi.as_ref().map_or(0, Vec::len)),
             abi_cache: Arc::new(pod.abi.map_or_else(
                 || {
                     warn!("POD account with unknown ABI is being created! Assuming no abi.");
@@ -271,7 +273,7 @@ impl Account {
     /// Verify value proof of the trie's storage at `key`.
     pub fn verify_value_proof(&self, key: &H256, proof: &[Bytes]) -> Option<H256> {
         trie::triedb::verify_value_proof(key, self.storage_root, proof, ::rlp::decode)
-            .map(|v: U256| v.into())
+            .map(&Into::into as &Fn(U256) -> H256)
     }
 
     /// Get cached storage value if any. Returns `None` if the
@@ -559,6 +561,17 @@ impl Account {
         &self.storage_changes
     }
 
+    /// Return the storage cache
+    pub fn storage_cache(&self) -> BTreeMap<String, String> {
+        let mut result = BTreeMap::new();
+        for (k, v) in self.storage_cache.borrow().iter() {
+            let key = String::from("0x") + &hex::encode(*k);
+            let value = String::from("0x") + &hex::encode(*v);
+            result.insert(key.clone(), value.clone());
+        }
+        result
+    }
+
     /// Increment the nonce of the account by one.
     pub fn inc_nonce(&mut self) {
         self.nonce = self.nonce + U256::from(1u8);
@@ -707,8 +720,8 @@ impl fmt::Debug for Account {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use account_db::*;
-    use cita_db::MemoryDB;
+    use crate::account_db::*;
+    use crate::cita_db::MemoryDB;
     use rlp::{Compressible, RlpType, UntrustedRlp};
 
     #[test]

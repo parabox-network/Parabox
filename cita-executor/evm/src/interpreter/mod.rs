@@ -30,11 +30,11 @@ use self::stack::{Stack, VecStack};
 use super::call_type::CallType;
 use super::error::{Error, Result};
 use super::return_data::{GasLeft, ReturnData};
-use action_params::{ActionParams, ActionValue};
+use crate::action_params::{ActionParams, ActionValue};
+use crate::evm::{self, CostType};
+use crate::ext::{ContractCreateResult, Ext, MessageCallResult};
+use crate::instructions::{self, Instruction, InstructionInfo};
 use bit_set::BitSet;
-use evm::{self, CostType};
-use ext::{ContractCreateResult, Ext, MessageCallResult};
-use instructions::{self, Instruction, InstructionInfo};
 use std::cmp;
 use std::mem;
 
@@ -182,7 +182,9 @@ impl<Cost: CostType> evm::Evm for Interpreter<Cost> {
                 gasometer.current_gas = gasometer.current_gas + *gas;
             }
 
-            if trace_executed {
+            let expect_mem_len =
+                mem_written.unwrap_or_default().0 + mem_written.unwrap_or_default().1;
+            if trace_executed && expect_mem_len < self.mem.len() {
                 ext.trace_executed(
                     gasometer.current_gas.as_u256(),
                     stack.peek_top(info.ret),

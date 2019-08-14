@@ -7,7 +7,7 @@ import argparse
 
 NODE_KEYS = [
     '0x98a476f1687bc3d60a2da2adbcba2c46958e61fa2fb4042cd7bc5816a710195b',
-    '0x312b5d21c330b0e88e86f3c5440c63bfddde72d1e155eca9c2d5d9929d012e1a'
+    '0xfa669cc5530281d59cb9af15f8c4ce666af51805dc63aaa69995533fb756c150',
 ]
 
 
@@ -48,12 +48,16 @@ def check(old, new, check_code):
             return False
         # Check the storage
         storage = old_alloc[addr]['storage']
-        for key in storage:
+        for old_key in storage:
+            old_value = storage[old_key]
+
+            key = "0x" + old_key[2:].zfill(64)
+            value = "0x" + old_value[2:].zfill(64)
             # Ignore the node manager's constructor
             if key in NODE_KEYS:
                 continue
             if key not in new_alloc[addr]['storage'] \
-                    or storage[key] != new_alloc[addr]['storage'][key]:
+                    or value != new_alloc[addr]['storage'][key]:
                 return False
 
     return True

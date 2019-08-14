@@ -17,90 +17,46 @@
 
 use crate::cita_protocol::network_message_to_pubsub_message;
 use crate::network::{NetworkClient, RemoteMessage};
-use crate::node_manager::{AddConnectedNodeReq, InitMsg, NetworkInitReq, NodesManagerClient};
+use crate::node_manager::{
+    AddConnectedNodeReq, InitMsg, NetworkInitReq, NodesManagerClient, RetransNetMsgReq,
+};
 use bytes::BytesMut;
+use cita_types::Address;
 use libproto::{Message as ProtoMessage, TryFrom, TryInto};
-use logger::{info, warn};
 use tentacle::{
-    context::{ServiceContext, SessionContext},
-    traits::{ProtocolMeta, ServiceProtocol},
+    builder::MetaBuilder,
+    context::{ProtocolContext, ProtocolContextMutRef},
+    service::{ProtocolHandle, ProtocolMeta},
+    traits::ServiceProtocol,
     ProtocolId, SessionId,
 };
 use tokio::codec::length_delimited::LengthDelimitedCodec;
 
-pub const TRANSFER_PROTOCOL_ID: ProtocolId = 1;
-
-pub struct TransferProtocolMeta {
-    id: ProtocolId,
-    network_client: NetworkClient,
-    nodes_mgr_client: NodesManagerClient,
-}
-
-impl TransferProtocolMeta {
-    pub fn new(
-        id: ProtocolId,
-        network_client: NetworkClient,
-        nodes_mgr_client: NodesManagerClient,
-    ) -> Self {
-        TransferProtocolMeta {
-            id,
-            network_client,
-            nodes_mgr_client,
-        }
-    }
-}
-
-impl ProtocolMeta<LengthDelimitedCodec> for TransferProtocolMeta {
-    fn id(&self) -> ProtocolId {
-        self.id
-    }
-
-    fn name(&self) -> String {
-        "/cita/transfer".to_owned()
-    }
-
-    fn support_versions(&self) -> Vec<String> {
-        vec!["0.0.1".to_owned()]
-    }
-
-    fn codec(&self) -> LengthDelimitedCodec {
-        LengthDelimitedCodec::new()
-    }
-
-    fn service_handle(&self) -> Option<Box<dyn ServiceProtocol + Send + 'static>> {
-        let handle = Box::new(TransferProtocol {
-            proto_id: self.id,
-            connected_session_ids: Vec::default(),
-            network_client: self.network_client.clone(),
-            nodes_mgr_client: self.nodes_mgr_client.clone(),
-        });
-        Some(handle)
-    }
-}
+// Quota (1 byte) = 200,
+// Max 20 block in one transfer.
+// 512M can support BQL set to 2 ** 32 - 1
+pub const MAX_FRAME_LENGTH: usize = 512 * 1024 * 1204;
+pub const TRANSFER_PROTOCOL_ID: ProtocolId = ProtocolId::new(1);
 
 struct TransferProtocol {
     proto_id: ProtocolId,
     connected_session_ids: Vec<SessionId>,
     network_client: NetworkClient,
     nodes_mgr_client: NodesManagerClient,
+    self_address: Address,
 }
 
 impl ServiceProtocol for TransferProtocol {
-    fn init(&mut self, _control: &mut ServiceContext) {}
+    fn init(&mut self, _control: &mut ProtocolContext) {}
 
-    fn connected(
-        &mut self,
-        _control: &mut ServiceContext,
-        session: &SessionContext,
-        version: &str,
-    ) {
+    fn connected(&mut self, control: ProtocolContextMutRef, version: &str) {
         info!(
             "[Transfer] Connected proto id [{}] open on session [{}], address: [{}], type: [{:?}], version: {}",
-            self.proto_id, session.id, session.address, session.ty, version
+            self.proto_id, control.session.id, control.session.address, control.session.ty, version
         );
-        self.connected_session_ids.push(session.id);
+        self.connected_session_ids.push(control.session.id);
 
-        let req = NetworkInitReq::new(session.id);
+        let req = NetworkInitReq::new(control.session.id);
         self.nodes_mgr_client.network_init(req);
 
         info!(
@@ -109,38 +65,81 @@ impl ServiceProtocol for TransferProtocol {
         );
     }
 
-    fn disconnected(&mut self, _control: &mut ServiceContext, session: &SessionContext) {
+    fn disconnected(&mut self, control: ProtocolContextMutRef) {
         let new_list = self
             .connected_session_ids
             .iter()
-            .filter(|&id| id != &session.id)
+            .filter(|&id| id != &control.session.id)
             .cloned()
             .collect();
         self.connected_session_ids = new_list;
 
         info!(
             "[Transfer] Disconnected proto id [{}] close on session [{}]",
-            self.proto_id, session.id
+            self.proto_id, control.session.id
         );
     }
 
-    fn received(&mut self, _env: &mut ServiceContext, session: &SessionContext, data: Vec<u8>) {
+    fn received(&mut self, env: ProtocolContextMutRef, data: bytes::Bytes) {
         let mut data = BytesMut::from(data);
 
-        if let Some((key, message)) = network_message_to_pubsub_message(&mut data) {
-            if key.eq(&"network.init".to_string()) {
-                let msg = InitMsg::from(message);
-                let req = AddConnectedNodeReq::new(session.id, session.ty, msg);
+        if let Some(mut info) = network_message_to_pubsub_message(&mut data) {
+            if info.key.eq(&"network.init".to_string()) {
+                let msg = InitMsg::from(info.data);
+                let req = AddConnectedNodeReq::new(env.session.id, env.session.ty, msg);
                 self.nodes_mgr_client.add_connected_node(req);
                 return;
             }
 
-            let mut msg = ProtoMessage::try_from(&message).unwrap();
-            msg.set_origin(session.id as u32);
+            if info.addr == self.self_address {
+                debug!("[Transfer] Recieve myself {:?} message", info.addr);
+                return;
+            }
+
+            let sid = env.session.id;
+            let mut msg = ProtoMessage::try_from(&info.data).unwrap();
+            msg.set_origin(sid.value() as u32);
             self.network_client
-                .handle_remote_message(RemoteMessage::new(key, msg.try_into().unwrap()));
+                .handle_remote_message(RemoteMessage::new(
+                    info.key.clone(),
+                    msg.try_into().unwrap(),
+                ));
+
+            // Now only consensus need be retransfered
+            if info.ttl > 0 {
+                info.ttl -= 1;
+                let req = RetransNetMsgReq::new(info, sid);
+                self.nodes_mgr_client.retrans_net_msg(req);
+            }
         } else {
             warn!("[Transfer] Cannot convert network message to pubsub message!");
         }
     }
+}
+
+pub fn create_transfer_meta(
+    network_client: NetworkClient,
+    nodes_mgr_client: NodesManagerClient,
+    self_address: Address,
+) -> ProtocolMeta {
+    MetaBuilder::default()
+        .id(TRANSFER_PROTOCOL_ID)
+        .codec(|| {
+            let mut lcodec = LengthDelimitedCodec::new();
+            lcodec.set_max_frame_length(MAX_FRAME_LENGTH);
+            Box::new(lcodec)
+        })
+        .service_handle(move || {
+            let handle = Box::new(TransferProtocol {
+                proto_id: TRANSFER_PROTOCOL_ID,
+                connected_session_ids: Vec::default(),
+                network_client: network_client.clone(),
+                nodes_mgr_client: nodes_mgr_client.clone(),
+                self_address,
+            });
+            ProtocolHandle::Callback(handle)
+        })
+        .name(|_| "/cita/transfer".to_owned())
+        .support_versions(vec!["0.0.2".to_owned()])
+        .build()
 }

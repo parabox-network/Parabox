@@ -14,12 +14,12 @@
 // You should have received a copy of the GNU General Public License
 // along with Parity.  If not, see <http://www.gnu.org/licenses/>.
 
-use account_db::AccountDBMut;
-use cita_db::{sec_trie_root, HashDB, TrieFactory};
+use crate::account_db::AccountDBMut;
+use crate::cita_db::{sec_trie_root, HashDB, TrieFactory};
+use crate::state::Account;
 use cita_types::{H256, U256};
 use hashable::Hashable;
 use rlp::{self, RlpStream};
-use state::Account;
 use std::collections::BTreeMap;
 use std::fmt;
 use util::*;
@@ -106,12 +106,14 @@ impl fmt::Display for PodAccount {
             "(bal={}; nonce={}; code={} bytes, #{}; abi={} bytes, #{}; storage={} items)",
             self.balance,
             self.nonce,
-            self.code.as_ref().map_or(0, |c| c.len()),
+            self.code.as_ref().map_or(0, Vec::len),
             self.code
                 .as_ref()
-                .map_or_else(H256::new, |c| c.crypt_hash()),
-            self.abi.as_ref().map_or(0, |c| c.len()),
-            self.abi.as_ref().map_or_else(H256::new, |c| c.crypt_hash()),
+                .map_or_else(H256::new, Hashable::crypt_hash),
+            self.abi.as_ref().map_or(0, Vec::len),
+            self.abi
+                .as_ref()
+                .map_or_else(H256::new, Hashable::crypt_hash),
             self.storage.len(),
         )
     }

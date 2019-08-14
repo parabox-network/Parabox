@@ -1,5 +1,5 @@
 // CITA
-// Copyright 2016-2018 Cryptape Technologies LLC.
+// Copyright 2016-2019 Cryptape Technologies LLC.
 
 // This program is free software: you can redistribute it
 // and/or modify it under the terms of the GNU General Public
@@ -15,23 +15,23 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use crate::contracts::native::factory::Factory as NativeFactory;
+use crate::contracts::tools::method as method_tools;
+use crate::engines::NullEngine;
+use crate::externalities::{Externalities, OriginInfo, OutputPolicy};
+use crate::libexecutor::economical_model::EconomicalModel;
+use crate::state::State;
+use crate::state::Substate;
+use crate::state_db::StateDB;
+use crate::trace::Tracer;
+use crate::trace::{NoopTracer, NoopVMTracer};
+use crate::types::reserved_addresses;
 use cita_types::{Address, H160, U256};
-use contracts::native::factory::Factory as NativeFactory;
-use contracts::tools::method as method_tools;
-use engines::NullEngine;
 use evm::action_params::{ActionParams, ActionValue};
 use evm::call_type::CallType;
 use evm::env_info::EnvInfo;
 use evm::{Factory, Finalize, VMType};
-use externalities::{Externalities, OriginInfo, OutputPolicy};
-use libexecutor::economical_model::EconomicalModel;
-use state::State;
-use state::Substate;
-use state_db::StateDB;
 use std::str::FromStr;
-use trace::Tracer;
-use trace::{NoopTracer, NoopVMTracer};
-use types::reserved_addresses;
 use util::BytesRef;
 
 const AUTO_EXEC: &[u8] = &*b"autoExec()";
@@ -41,11 +41,12 @@ lazy_static! {
     static ref AUTO_EXEC_HASH: Vec<u8> = method_tools::encode_to_vec(AUTO_EXEC);
 }
 
-// pub fn auto_exec(state: &mut State<StateDB>) -> evm::Result<FinalizationResult> {
 pub fn auto_exec(
     state: &mut State<StateDB>,
     auto_exec_quota_limit: u64,
     economical_model: EconomicalModel,
+    env_info: EnvInfo,
+    chain_version: u32,
 ) {
     let hash = &*AUTO_EXEC_HASH;
     let params = ActionParams {
@@ -68,7 +69,7 @@ pub fn auto_exec(
     let mut trace_output = tracer.prepare_trace_output();
     let output = OutputPolicy::Return(BytesRef::Flexible(&mut out), trace_output.as_mut());
     let factory = Factory::new(VMType::Interpreter, 1024 * 32);
-    let env_info = EnvInfo::default();
+
     let engine = NullEngine::default();
     let native_factory = NativeFactory::default();
     let origin_info = OriginInfo::from(&params);
@@ -87,6 +88,7 @@ pub fn auto_exec(
         &mut vm_tracer,
         false,
         economical_model,
+        chain_version,
     );
     let res = {
         factory

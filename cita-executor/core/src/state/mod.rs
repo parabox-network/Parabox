@@ -19,19 +19,21 @@
 //! Unconfirmed sub-states are managed with `checkpoint`s which may be canonicalized
 //! or rolled back.
 
-use cita_db::{trie, HashDB, Trie, TrieError};
+use crate::cita_db::{trie, HashDB, Trie, TrieError};
+use crate::engines::Engine;
+use crate::error::{Error, ExecutionError};
+use crate::executive::{Executive, TransactOptions};
+use crate::factory::Factories;
+use crate::libexecutor::economical_model::EconomicalModel;
+use crate::libexecutor::sys_config::BlockSysConfig;
+use crate::receipt::{Receipt, ReceiptError};
+use crate::trace::FlatTrace;
+use crate::types::transaction::SignedTransaction;
 use cita_types::{Address, H256, U256};
-use engines::Engine;
-use error::{Error, ExecutionError};
 use evm::env_info::EnvInfo;
 use evm::Error as EvmError;
 use evm::Schedule;
-use executive::{Executive, TransactOptions};
-use factory::Factories;
 use hashable::HASH_EMPTY;
-use libexecutor::economical_model::EconomicalModel;
-use libexecutor::sys_config::BlockSysConfig;
-use receipt::{Receipt, ReceiptError};
 use rlp::{self, Encodable};
 use std::cell::{Ref, RefCell, RefMut};
 use std::cmp;
@@ -39,8 +41,6 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
-use trace::FlatTrace;
-use types::transaction::SignedTransaction;
 use util::*;
 
 pub mod account;
@@ -48,7 +48,7 @@ pub mod backend;
 
 pub use self::account::Account;
 use self::backend::*;
-pub use substate::Substate;
+pub use crate::substate::Substate;
 
 /// Used to return information about an `State::apply` operation.
 pub struct ApplyOutcome {
@@ -103,7 +103,7 @@ impl AccountEntry {
     }
 
     fn exists_and_is_null(&self) -> bool {
-        self.account.as_ref().map_or(false, |a| a.is_null())
+        self.account.as_ref().map_or(false, Account::is_null)
     }
 
     /// Clone dirty data into new `AccountEntry`. This includes
@@ -272,7 +272,6 @@ const SEC_TRIE_DB_UNWRAP_STR: &str =
 
 impl<B: Backend> State<B> {
     /// Creates new state with empty state root
-    #[cfg(test)]
     pub fn new(mut db: B, account_start_nonce: U256, factories: Factories) -> State<B> {
         let mut root = H256::new();
         {
@@ -456,6 +455,13 @@ impl<B: Backend> State<B> {
         self.ensure_cached(a, RequireCache::None, true, |a| {
             a.as_ref()
                 .map_or(U256::zero(), |account| *account.balance())
+        })
+    }
+
+    /// Get account of `a`
+    pub fn account(&self, a: &Address) -> trie::Result<Option<Account>> {
+        self.ensure_cached(a, RequireCache::None, false, |a| {
+            a.as_ref().map(|account| account.clone_all())
         })
     }
 
@@ -761,6 +767,7 @@ impl<B: Backend> State<B> {
             &native_factory,
             false,
             conf.economical_model,
+            conf.chain_version,
         )
         .transact(t, options, conf)
         {
@@ -1196,37 +1203,27 @@ impl<B: Backend> fmt::Debug for State<B> {
 
 #[cfg(test)]
 mod tests {
+    extern crate cita_logger as logger;
     extern crate libproto;
-    extern crate logger;
     extern crate rustc_hex;
     ////////////////////////////////////////////////////////////////////////////////
 
     use self::libproto::blockchain;
     use self::rustc_hex::FromHex;
     use super::*;
+    use crate::engines::NullEngine;
+    use crate::libexecutor::sys_config::BlockSysConfig;
+    use crate::tests::helpers::*;
     use cita_crypto::KeyPair;
     use cita_crypto_trait::CreateKey;
     use cita_types::traits::LowerHex;
     use cita_types::{Address, H256};
-    use engines::NullEngine;
     use evm::env_info::EnvInfo;
-    use libexecutor::sys_config::BlockSysConfig;
     use std::sync::Arc;
-    use tests::helpers::*;
 
     #[test]
     #[ignore]
     fn should_apply_create_transaction() {
-        /*
-        pragma solidity ^0.4.8;
-        contract AbiTest {
-          uint balance;
-          function AbiTest() {}
-          function setValue(uint value) {
-            balance = value;
-          }
-        }
-        */
         logger::silent();
 
         // 1) tx = (to, data(code), nonce, valid_until_block)
@@ -1279,7 +1276,7 @@ mod tests {
             gas_used: 0.into(),
             account_gas_limit: 1844674.into(),
         };
-        let contract_address = ::executive::contract_address(&signed.sender(), &U256::from(1));
+        let contract_address = crate::executive::contract_address(&signed.sender(), &U256::from(1));
         let engine = NullEngine::cita();
 
         println!("contract_address {:?}", contract_address);

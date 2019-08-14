@@ -22,15 +22,15 @@ use libproto::router::{MsgType, RoutingKey, SubModules};
 use libproto::routing_key;
 use libproto::{Message, OperateType, SyncRequest, SyncResponse};
 use libproto::{TryFrom, TryInto};
-use logger::{debug, error, info, warn};
 use pubsub::channel::{unbounded, Receiver, Sender};
 use rand::{thread_rng, Rng, ThreadRng};
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::convert::Into;
 use std::time::{Duration, Instant};
 use std::u8;
+use tentacle::SessionId;
 
-const SYNC_STEP: u64 = 20;
+const SYNC_STEP: u64 = 500;
 const SYNC_TIME_OUT: u64 = 9;
 
 /// Get messages and determine if need to synchronize or broadcast the current node status
@@ -331,7 +331,7 @@ impl Synchronizer {
             let msg = Message::init(OperateType::Single, origin, sync_req.into());
 
             self.nodes_mgr_client.send_message(SingleTxReq::new(
-                origin as usize,
+                SessionId::from(origin as usize),
                 routing_key!(Synchronizer >> SyncRequest).into(),
                 msg,
             ));
