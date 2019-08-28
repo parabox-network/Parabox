@@ -62,7 +62,10 @@ use util::*;
 /// Maybe something like here:
 /// `https://github.com/ethereum/libethereum/blob/4db169b8504f2b87f7d5a481819cfb959fc65f6c/libethereum/ExtVM.cpp`
 const STACK_SIZE_PER_DEPTH: usize = 24 * 1024;
+
+// TestNet 1000, MainNet 205000
 const ADD_TRANSFER_BALANCE_LOG_HIGHT: u64 = 205000;
+// TestNet 634000, MainNet 206000
 const REMOVE_TRANSFER_BALANCE_0_LOG_HIGHT: u64 = 206000;
 
 thread_local! {
